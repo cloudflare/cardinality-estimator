@@ -15,7 +15,7 @@
 //! - Cardinality in [5..8] range - 44 bytes (sparse representation)
 //! - Cardinality in [9..16] range - 76 bytes (sparse representation)
 //! - ...
-//! - Cardinality in [512..] range - 3088 bytes (dense representation)
+//! - Cardinality in [512..] range - 3092 bytes (dense representation)
 //!
 //! ## Low latency
 //! - Auto-vectorization for slice operations via compiler hints
@@ -121,7 +121,7 @@ impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
     /// Sparse precision
     const SP: usize = 25;
     /// Dense representation slice length
-    const DENSE_LEN: usize = Self::M * Self::W / 32 + 2;
+    const DENSE_LEN: usize = Self::M * Self::W / 32 + 3;
 
     /// Creates new instance of `CardinalityEstimator`
     #[inline]
@@ -580,24 +580,24 @@ fn get_register<const W: usize>(data: &[u32], idx: u32) -> u32 {
 #[inline]
 fn set_register<const W: usize>(data: &mut [u32], idx: u32, old_rank: u32, new_rank: u32) {
     let bit_idx = (idx as usize) * W;
-    let u32_idx = (bit_idx >> 5) + 2;
-    let bit_offset = bit_idx & 31;
-    let bits_left = 32 - bit_offset;
-    if bits_left >= W {
-        // register rank fits into single `u32`
-        data[u32_idx] &= !((((1 << W) - 1) << bit_offset) as u32);
-        data[u32_idx] |= new_rank << bit_offset;
-    } else {
-        // register rank spread across two `u32`
-        data[u32_idx] &= !((((1 << bits_left) - 1) << bit_offset) as u32);
-        data[u32_idx] |= (new_rank & ((1 << bits_left) - 1)) << bit_offset;
-        data[u32_idx + 1] &= !(((1 << (W - bits_left)) - 1) as u32);
-        data[u32_idx + 1] |= new_rank >> bits_left;
-    }
+    let u32_idx = (bit_idx / 32) + 2;
+    let bit_pos = bit_idx % 32;
+
+    let bits = unsafe { data.get_unchecked_mut(u32_idx..u32_idx + 2)};
+    let bits_1 = W.min(32 - bit_pos);
+    let bits_2 = W - bits_1;
+    let mask_1 = u32::MAX >> (32 - bits_1);
+    let mask_2 = (1u32 << bits_2) - 1;
+
+    // Unconditionally update two `u32` elements based on `new_rank` bits and masks
+    bits[0] &= !(mask_1 << bit_pos);
+    bits[0] |= (new_rank & mask_1) << bit_pos;
+    bits[1] &= !mask_2;
+    bits[1] |= (new_rank >> bits_1) & mask_2;
+
     // Update HyperLogLog's number of zero registers and harmonic sum
-    if old_rank == 0 && data[0] > 0 {
-        data[0] -= 1;
-    }
+    data[0] -= (old_rank == 0) as u32 & (data[0] > 0) as u32;
+
     let mut sum = f32::from_bits(data[1]);
     sum -= 1.0 / ((1u64 << (old_rank as u64)) as f32);
     sum += 1.0 / ((1u64 << (new_rank as u64)) as f32);
@@ -625,11 +625,11 @@ pub mod tests {
     #[test_case(8 => (44, 0.0))]
     #[test_case(16 => (76, 0.0))]
     #[test_case(128 => (524, 0.0))]
-    #[test_case(256 => (656, 0.0034859252194967775))]
-    #[test_case(512 => (656, 0.011438153413131473))]
-    #[test_case(1024 => (656, 0.009174722239690614))]
-    #[test_case(10_000 => (656, 0.05376464708060471))]
-    #[test_case(100_000 => (656, 0.046539225394339356))]
+    #[test_case(256 => (660, 0.0034859252194967775))]
+    #[test_case(512 => (660, 0.011438153413131473))]
+    #[test_case(1024 => (660, 0.009174722239690614))]
+    #[test_case(10_000 => (660, 0.05376464708060471))]
+    #[test_case(100_000 => (660, 0.046539225394339356))]
     fn test_estimator_p10_w5(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<10, 5>::new(), n)
     }
@@ -643,10 +643,10 @@ pub mod tests {
     #[test_case(16 => (76, 0.0))]
     #[test_case(256 => (1036, 0.0))]
     #[test_case(512 => (2060, 0.0))]
-    #[test_case(1024 => (3088, 0.0019770707361336038))]
-    #[test_case(4096 => (3088, 0.007278227404470562))]
-    #[test_case(10_000 => (3088, 0.006395190939889141))]
-    #[test_case(100_000 => (3088, 0.006130086967788904))]
+    #[test_case(1024 => (3092, 0.0019770707361336038))]
+    #[test_case(4096 => (3092, 0.007278227404470562))]
+    #[test_case(10_000 => (3092, 0.006395190939889141))]
+    #[test_case(100_000 => (3092, 0.006130086967788904))]
     fn test_estimator_p12_w6(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<12, 6>::new(), n)
     }

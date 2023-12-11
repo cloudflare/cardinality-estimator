@@ -77,7 +77,6 @@
 //! - data[2..]     - stores register ranks using `W` bits per each register.
 
 use std::hash::{Hash, Hasher};
-use std::ops::RangeInclusive;
 use std::slice;
 
 use crate::beta::beta_horner;
@@ -110,22 +109,21 @@ impl<const P: usize, const W: usize> Default for CardinalityEstimator<P, W> {
 }
 
 impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
-    /// Precision parameter in [4..18] range, which defines
-    /// number of bits to use for HyperLogLog register indices.
-    const P: usize = assert_within_range(P, 4..=18);
-    /// Width parameter in [4..6] range, which defines
-    /// number of bits to use for HyperLogLog register width.
-    const W: usize = assert_within_range(W, 4..=6);
+    /// Ensure that `P` and `W` are in correct range at compile time
+    const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
     /// Number of HyperLogLog registers
     const M: usize = 1 << P;
     /// Sparse precision
     const SP: usize = 25;
     /// Dense representation slice length
-    const DENSE_LEN: usize = Self::M * Self::W / 32 + 3;
+    const DENSE_LEN: usize = Self::M * W / 32 + 3;
 
     /// Creates new instance of `CardinalityEstimator`
     #[inline]
     pub fn new() -> Self {
+        // compile time check of params
+        _ = Self::VALID_PARAMS;
+
         Self {
             // Start with empty small representation
             data: SMALL_MASK,
@@ -360,7 +358,7 @@ impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
     #[inline]
     fn encode_hash(hash: u64) -> u32 {
         let idx = bextr64(hash, 64 - Self::SP, Self::SP) as u32;
-        if bextr64(hash, 64 - Self::SP, Self::SP - Self::P) == 0 {
+        if bextr64(hash, 64 - Self::SP, Self::SP - P) == 0 {
             let tmp = (bextr64(hash, 0, 64 - Self::SP) << Self::SP) | ((1 << Self::SP) - 1);
             let zeros = tmp.leading_zeros() + 1;
             return (idx << 7) | (zeros << 1) | 1;
@@ -372,12 +370,12 @@ impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
     #[inline]
     fn decode_hash(h: u32) -> (u32, u32) {
         if h & 1 == 1 {
-            let idx = bextr32(h, 32 - Self::P, Self::P);
-            let rank = bextr32(h, 1, Self::W) + (Self::SP - Self::P) as u32;
+            let idx = bextr32(h, 32 - P, P);
+            let rank = bextr32(h, 1, W) + (Self::SP - P) as u32;
             (idx, rank)
         } else {
-            let idx = bextr32(h, Self::SP - Self::P + 1, Self::P);
-            let rank = ((h << (32 - Self::SP + Self::P - 1)) as u64).leading_zeros() - 31;
+            let idx = bextr32(h, Self::SP - P + 1, P);
+            let rank = ((h << (32 - Self::SP + P - 1)) as u64).leading_zeros() - 31;
             (idx, rank)
         }
     }
@@ -465,7 +463,7 @@ impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
         let zeros = data[0];
         let sum = f32::from_bits(data[1]) as f64;
         let estimate = alpha(Self::M) * ((Self::M * (Self::M - zeros as usize)) as f64)
-            / (sum + beta_horner(zeros as f64, Self::P));
+            / (sum + beta_horner(zeros as f64, P));
         (estimate + 0.5) as usize
     }
 
@@ -583,7 +581,7 @@ fn set_register<const W: usize>(data: &mut [u32], idx: u32, old_rank: u32, new_r
     let u32_idx = (bit_idx / 32) + 2;
     let bit_pos = bit_idx % 32;
 
-    let bits = unsafe { data.get_unchecked_mut(u32_idx..u32_idx + 2)};
+    let bits = unsafe { data.get_unchecked_mut(u32_idx..u32_idx + 2) };
     let bits_1 = W.min(32 - bit_pos);
     let bits_2 = W - bits_1;
     let mask_1 = u32::MAX >> (32 - bits_1);
@@ -602,13 +600,6 @@ fn set_register<const W: usize>(data: &mut [u32], idx: u32, old_rank: u32, new_r
     sum -= 1.0 / ((1u64 << (old_rank as u64)) as f32);
     sum += 1.0 / ((1u64 << (new_rank as u64)) as f32);
     data[1] = sum.to_bits();
-}
-
-/// Assert that given number is within specified range
-#[inline]
-const fn assert_within_range(n: usize, range: RangeInclusive<usize>) -> usize {
-    assert!(n >= *range.start() && n <= *range.end());
-    n
 }
 
 #[cfg(test)]

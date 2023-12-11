@@ -78,6 +78,7 @@
 
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
+use std::mem::{size_of, size_of_val};
 use std::slice;
 
 use crate::beta::beta_horner;
@@ -106,14 +107,6 @@ pub struct CardinalityEstimator<const P: usize = 12, const W: usize = 6, H: Hash
     pub(crate) data: usize,
     /// Phantom field for the hasher
     _phantom_hasher: PhantomData<H>,
-}
-
-impl<const P: usize, const W: usize, H: Hasher + Default> Default
-    for CardinalityEstimator<P, W, H>
-{
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P, W, H> {
@@ -479,11 +472,17 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Return memory size of `CardinalityEstimator`
     pub fn size_of(&self) -> usize {
         match (self.is_small(), self.is_sparse()) {
-            (true, false) => std::mem::size_of::<Self>(),
-            (_, _) => {
-                std::mem::size_of::<Self>() + std::mem::size_of::<u32>() * self.as_slice().len()
-            }
+            (true, false) => size_of::<Self>(),
+            (_, _) => size_of::<Self>() + size_of_val(self.as_slice()),
         }
+    }
+}
+
+impl<const P: usize, const W: usize, H: Hasher + Default> Default
+    for CardinalityEstimator<P, W, H>
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -77,9 +77,12 @@
 //! - data[2..]     - stores register ranks using `W` bits per each register.
 
 use std::hash::{Hash, Hasher};
+use std::marker::PhantomData;
 use std::slice;
 
 use crate::beta::beta_horner;
+
+use xxhash_rust::xxh3::Xxh3;
 
 /// Mask used to check whether cardinality estimator uses small representation
 const SMALL_MASK: usize = 0x8000_0000_0000_0000;
@@ -97,18 +100,23 @@ const SLICE_LEN_OFFSET: usize = 59;
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
 #[derive(Debug)]
-pub struct CardinalityEstimator<const P: usize, const W: usize> {
+pub struct CardinalityEstimator<const P: usize = 12, const W: usize = 6, H: Hasher + Default = Xxh3>
+{
     /// Raw data format described above
     pub(crate) data: usize,
+    /// Phantom field for the hasher
+    _phantom_hasher: PhantomData<H>,
 }
 
-impl<const P: usize, const W: usize> Default for CardinalityEstimator<P, W> {
+impl<const P: usize, const W: usize, H: Hasher + Default> Default
+    for CardinalityEstimator<P, W, H>
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
+impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P, W, H> {
     /// Ensure that `P` and `W` are in correct range at compile time
     const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
     /// Number of HyperLogLog registers
@@ -127,6 +135,7 @@ impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
         Self {
             // Start with empty small representation
             data: SMALL_MASK,
+            _phantom_hasher: PhantomData,
         }
     }
 
@@ -147,7 +156,7 @@ impl<const P: usize, const W: usize> CardinalityEstimator<P, W> {
 
     /// Insert a hashable item into `CardinalityEstimator`
     #[inline]
-    pub fn insert<T: Hash, H: Hasher + Default>(&mut self, item: T) {
+    pub fn insert<T: Hash>(&mut self, item: T) {
         let mut hasher = H::default();
         item.hash(&mut hasher);
         self.insert_hash(hasher.finish());
@@ -482,7 +491,10 @@ impl<const P: usize, const W: usize> Clone for CardinalityEstimator<P, W> {
     /// Clone `CardinalityEstimator`
     fn clone(&self) -> Self {
         match self.is_small() {
-            true => Self { data: self.data },
+            true => Self {
+                data: self.data,
+                _phantom_hasher: PhantomData,
+            },
             false => {
                 let mut estimator = Self::new();
                 estimator.merge(self);
@@ -492,7 +504,7 @@ impl<const P: usize, const W: usize> Clone for CardinalityEstimator<P, W> {
     }
 }
 
-impl<const P: usize, const W: usize> Drop for CardinalityEstimator<P, W> {
+impl<const P: usize, const W: usize, H: Default + Hasher> Drop for CardinalityEstimator<P, W, H> {
     /// Free memory occupied by `CardinalityEstimator`
     fn drop(&mut self) {
         if !self.is_small() {
@@ -501,7 +513,9 @@ impl<const P: usize, const W: usize> Drop for CardinalityEstimator<P, W> {
     }
 }
 
-impl<const P: usize, const W: usize> PartialEq for CardinalityEstimator<P, W> {
+impl<const P: usize, const W: usize, H: Default + Hasher> PartialEq
+    for CardinalityEstimator<P, W, H>
+{
     /// Compare cardinality estimators
     fn eq(&self, rhs: &Self) -> bool {
         if self.is_small() {
@@ -605,7 +619,6 @@ fn set_register<const W: usize>(data: &mut [u32], idx: u32, old_rank: u32, new_r
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use seahash::{hash, SeaHasher};
     use test_case::test_case;
 
     #[test_case(0 => (8, 0.0))]
@@ -616,11 +629,11 @@ pub mod tests {
     #[test_case(8 => (44, 0.0))]
     #[test_case(16 => (76, 0.0))]
     #[test_case(128 => (524, 0.0))]
-    #[test_case(256 => (660, 0.0034859252194967775))]
-    #[test_case(512 => (660, 0.011438153413131473))]
-    #[test_case(1024 => (660, 0.009174722239690614))]
-    #[test_case(10_000 => (660, 0.05376464708060471))]
-    #[test_case(100_000 => (660, 0.046539225394339356))]
+    #[test_case(256 => (660, 0.01428608717942597))]
+    #[test_case(512 => (660, 0.013023788120268947))]
+    #[test_case(1024 => (660, 0.014517720556272953))]
+    #[test_case(10_000 => (660, 0.02614431358700056))]
+    #[test_case(100_000 => (660, 0.016867961360547964))]
     fn test_estimator_p10_w5(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<10, 5>::new(), n)
     }
@@ -634,10 +647,10 @@ pub mod tests {
     #[test_case(16 => (76, 0.0))]
     #[test_case(256 => (1036, 0.0))]
     #[test_case(512 => (2060, 0.0))]
-    #[test_case(1024 => (3092, 0.0019770707361336038))]
-    #[test_case(4096 => (3092, 0.007278227404470562))]
-    #[test_case(10_000 => (3092, 0.006395190939889141))]
-    #[test_case(100_000 => (3092, 0.006130086967788904))]
+    #[test_case(1024 => (3092, 0.002375373334168125))]
+    #[test_case(4096 => (3092, 0.003105140671097913))]
+    #[test_case(10_000 => (3092, 0.0051820599485679466))]
+    #[test_case(100_000 => (3092, 0.011020222347468332))]
     fn test_estimator_p12_w6(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<12, 6>::new(), n)
     }
@@ -653,8 +666,8 @@ pub mod tests {
     #[test_case(512 => (2060, 0.0))]
     #[test_case(1024 => (4108, 0.0))]
     #[test_case(4096 => (16396, 0.0))]
-    #[test_case(8192 => (32780, 0.0))]
-    #[test_case(10_000 => (65548, 0.0))]
+    #[test_case(8192 => (32780, 5.3602457823617544e-6))]
+    #[test_case(10_000 => (65548, 2.4330815282868074e-5))]
     fn test_estimator_p18_w6(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<18, 6>::new(), n)
     }
@@ -665,8 +678,7 @@ pub mod tests {
     ) -> (usize, f64) {
         let mut total_relative_error: f64 = 0.0;
         for i in 0..n {
-            let hash = hash(&i.to_le_bytes());
-            e.insert_hash(hash);
+            e.insert(i);
             let estimate = e.estimate() as f64;
             let actual = (i + 1) as f64;
             let error = estimate - actual;
@@ -705,30 +717,28 @@ pub mod tests {
     #[test_case(512, 0 => 512)]
     #[test_case(0, 512 => 512)]
     // cases with error > 0%
-    #[test_case(512, 1 => 518)]
-    #[test_case(1, 512 => 522)]
-    #[test_case(512, 512 => 1045)]
-    #[test_case(513, 513 => 1045)]
-    #[test_case(10000, 0 => 9933)]
-    #[test_case(0, 10000 => 9965)]
-    #[test_case(4, 10000 => 9974)]
-    #[test_case(512, 10000 => 10518)]
-    #[test_case(10000, 10000 => 19718)]
+    #[test_case(512, 1 => 508)]
+    #[test_case(1, 512 => 520)]
+    #[test_case(512, 512 => 1031)]
+    #[test_case(513, 513 => 1032)]
+    #[test_case(10000, 0 => 10183)]
+    #[test_case(0, 10000 => 9882)]
+    #[test_case(4, 10000 => 9892)]
+    #[test_case(512, 10000 => 10455)]
+    #[test_case(10000, 10000 => 19569)]
     fn test_merge(lhs_n: usize, rhs_n: usize) -> usize {
         let mut lhs = CardinalityEstimator::<12, 6>::new();
         let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 1];
         for i in 0..lhs_n {
             buf[..8].copy_from_slice(&i.to_le_bytes());
-            let hash = hash(&buf);
-            lhs.insert_hash(hash);
+            lhs.insert(buf);
         }
 
         let mut rhs = CardinalityEstimator::<12, 6>::new();
         let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 2];
         for i in 0..rhs_n {
             buf[..8].copy_from_slice(&i.to_le_bytes());
-            let hash = hash(&buf);
-            rhs.insert_hash(hash);
+            rhs.insert(buf);
         }
 
         lhs.merge(&rhs);
@@ -744,17 +754,15 @@ pub mod tests {
         assert_eq!(e.estimate(), 0);
 
         // Insert a test item and validate estimate.
-        let item = "test item 1";
-        e.insert::<_, SeaHasher>(item);
+        e.insert("test item 1");
         assert_eq!(e.estimate(), 1);
 
         // Re-insert the same item, estimate should remain the same.
-        e.insert::<_, SeaHasher>(item);
+        e.insert("test item 1");
         assert_eq!(e.estimate(), 1);
 
         // Insert a new distinct item, estimate should increase.
-        let item = "test item 2";
-        e.insert::<_, SeaHasher>(item);
+        e.insert("test item 2");
         assert_eq!(e.estimate(), 2);
     }
 }

@@ -13,18 +13,28 @@ categories = ["algorithms", "data-structures"]
 
 [dependencies]
 serde = { version = "1.0.164", optional = true }
+hyperloglog-rs = { version = "0.1.45", optional = true }
+xxhash-rust = { version = "0.8.7", features = ["xxh3"] }
 
 [dev-dependencies]
+amadeus-streaming = "0.4.3"
 criterion = { version = "0.5.1", features = ["html_reports"] }
-pprof = { version = "0.6.2", features = ["flamegraph", "protobuf", "criterion"] }
+hyperloglog = "1.0.2"
+hyperloglogplus = "0.4.1"
+pprof = { version = "0.12.1", features = ["flamegraph", "protobuf-codec", "criterion"] }
+probabilistic-collections = "0.7.0"
+siphasher = "1.0.0"
 seahash = "4.1.0"
 serde_json = "1.0.97"
+streaming_algorithms = "0.3.0"
 test-case = "3.1.0"
+xxhash-rust = { version = "0.8.6", features = ["xxh3"] }
 
 [[bench]]
-name = "cardinality_estimator_benchmark"
+name = "cardinality_estimator"
 harness = false
 
 [features]
 default = []
 with_serde = ["serde"]
+nightly = ["hyperloglog-rs"]

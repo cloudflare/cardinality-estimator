@@ -52,6 +52,24 @@ The cardinality-estimator achieves high accuracy by using precise counting for s
 This provides expected error rates as low as 0.02% for large cardinalities.
 
 ## Benchmarks
+
+To run benchmarks you first need to install `cargo-criterion` binary:
+```shell
+cargo install cargo-criterion
+```
+
+Then benchmarks with output format JSON to save results for further analysis:
+```shell
+cargo criterion --bench cardinality_estimator --message-format json | tee benches/bench_results_$(date '+%Y%m%d_%H%M%S').json
+```
+
+To generate benchmark results charts and tables install and launch Jupyter lab:
+```shell
+cd benches
+pip install -r requirements.txt
+jupyter lab
+```
+
 We've benchmarked cardinality-estimator against several other crates in the ecosystem. Here are the results:
 
 | Crate                                                                           | Features | Insert latency diff (%) | Estimate latency diff (%) | Memory footprint diff (%) |

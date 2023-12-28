@@ -162,20 +162,25 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         if h == 0 {
             return;
         }
-        match (self.is_small(), self.is_sparse()) {
-            (true, false) => self.insert_into_small(h),
-            (false, true) => self.insert_into_sparse(h),
-            (_, _) => Self::insert_into_dense(self.as_mut_slice(), h),
+        if self.is_small() {
+            self.insert_into_small(h);
+        } else if self.is_sparse() {
+            self.insert_into_sparse(h);
+        } else {
+            let (idx, new_rank) = Self::decode_hash(h);
+            Self::insert_into_dense(self.as_mut_dense_slice(), idx, new_rank);
         }
     }
 
     /// Return cardinality estimate
     #[inline]
     pub fn estimate(&self) -> usize {
-        match (self.is_small(), self.is_sparse()) {
-            (true, false) => self.estimate_small(),
-            (false, true) => self.estimate_sparse(),
-            (_, _) => self.estimate_dense(),
+        if self.is_small() {
+            self.estimate_small()
+        } else if self.is_sparse() {
+            self.estimate_sparse()
+        } else {
+            self.estimate_dense()
         }
     }
 
@@ -193,7 +198,11 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
                 // make copy of `rhs` slice into `self` and then insert saved hashes
                 let h1 = self.small_h1();
                 let h2 = self.small_h2();
-                let rhs_data = Vec::from(rhs.as_slice());
+                let rhs_data = if rhs.is_sparse() {
+                    Vec::from(rhs.as_sparse_slice())
+                } else {
+                    Vec::from(rhs.as_dense_slice())
+                };
                 self.replace_data(rhs_data);
                 self.insert_encoded_hash(h1);
                 self.insert_encoded_hash(h2);
@@ -201,7 +210,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
             (false, false) => match (self.is_sparse(), rhs.is_sparse()) {
                 (_, true) => {
                     // when `rhs` has sparse representation - just insert its hashes into `self`
-                    let rhs_data = rhs.as_slice();
+                    let rhs_data = rhs.as_sparse_slice();
                     let rhs_len = rhs_data[0] as usize;
                     rhs_data[1..rhs_len + 1]
                         .iter()
@@ -210,17 +219,17 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
                 (true, false) => {
                     // when `self` has sparse representation - save its hashes into vector,
                     // make copy of `rhs` slice into `self` and then insert saved hashes
-                    let lhs_data = self.as_slice();
+                    let lhs_data = self.as_sparse_slice();
                     let lhs_len = lhs_data[0] as usize;
                     let lhs_hashes = Vec::from(&lhs_data[1..lhs_len + 1]);
-                    let rhs_data = rhs.as_slice();
+                    let rhs_data = rhs.as_dense_slice();
                     self.replace_data(Vec::from(rhs_data));
                     lhs_hashes.iter().for_each(|h| self.insert_encoded_hash(*h));
                 }
                 (false, false) => {
                     // when both estimators have dense HyperLogLog representation
-                    let lhs_data = self.as_mut_slice();
-                    let rhs_data = rhs.as_slice();
+                    let lhs_data = self.as_mut_dense_slice();
+                    let rhs_data = rhs.as_dense_slice();
                     Self::merge_dense(lhs_data, rhs_data);
                 }
             },
@@ -292,14 +301,14 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Insert encoded hash into sparse representation
     #[inline]
     fn insert_into_sparse(&mut self, h: u32) {
-        let data = self.as_mut_slice();
+        let data = self.as_mut_sparse_slice();
 
         let len = data[0] as usize;
         let found = if data.len() == 5 {
             contains_fixed_vectorized::<4>(data[1..5].try_into().unwrap(), h)
         } else {
             // calculate rounded up slice length for efficient look up in batches
-            let clen = 8 * (len / 8 + usize::from(len % 8 != 0));
+            let clen = 8 * len.div_ceil(8);
             contains_vectorized::<8>(&data[1..clen + 1], h)
         };
 
@@ -338,7 +347,11 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     #[inline]
     pub(crate) fn replace_data(&mut self, data: Vec<u32>) {
         if !self.is_small() {
-            drop(unsafe { Box::from_raw(self.as_mut_slice()) });
+            if self.is_sparse() {
+                drop(unsafe { Box::from_raw(self.as_mut_sparse_slice()) });
+            } else {
+                drop(unsafe { Box::from_raw(self.as_mut_dense_slice()) });
+            }
         }
         self.data = (SLICE_PTR_MASK & (data.as_ptr() as usize)) | self.encoded_slice_len(&data);
         std::mem::forget(data);
@@ -350,9 +363,10 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         let mut data = vec![0u32; Self::DENSE_LEN];
         data[0] = Self::M as u32;
         data[1] = (Self::M as f32).to_bits();
-        sparse_data[1..]
-            .iter()
-            .for_each(|h| Self::insert_into_dense(data.as_mut_slice(), *h));
+        sparse_data[1..].iter().for_each(|h| {
+            let (idx, new_rank) = Self::decode_hash(*h);
+            Self::insert_into_dense(data.as_mut_slice(), idx, new_rank);
+        });
         data
     }
 
@@ -392,17 +406,6 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         }
     }
 
-    /// Return size of underlying slice of sparse or dense representation
-    /// based on encoded length stored in `self.data`
-    #[inline]
-    fn slice_len(&self) -> usize {
-        if self.is_sparse() {
-            (1 << (((self.data & SLICE_LEN_MASK) >> SLICE_LEN_OFFSET) + 1)) + 1
-        } else {
-            Self::DENSE_LEN
-        }
-    }
-
     /// Return encoded slice len based on specified slice length
     #[inline]
     fn encoded_slice_len(&self, data: &[u32]) -> usize {
@@ -413,33 +416,46 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         }
     }
 
-    /// Return mutable underlying slice of sparse or dense representation
+    /// Return underlying slice of sparse representation
     #[inline]
-    fn as_mut_slice(&mut self) -> &mut [u32] {
+    pub(crate) fn as_sparse_slice(&self) -> &[u32] {
+        let ptr = (self.data & SLICE_PTR_MASK) as *const u32;
+        let len = (1 << (((self.data & SLICE_LEN_MASK) >> SLICE_LEN_OFFSET) + 1)) + 1;
+        unsafe { slice::from_raw_parts(ptr, len) }
+    }
+
+    /// Return underlying slice of dense representation
+    #[inline]
+    pub(crate) fn as_dense_slice(&self) -> &[u32] {
+        let ptr = (self.data & SLICE_PTR_MASK) as *const u32;
+        unsafe { slice::from_raw_parts(ptr, Self::DENSE_LEN) }
+    }
+
+    /// Return mutable underlying slice of sparse
+    #[inline]
+    fn as_mut_sparse_slice(&mut self) -> &mut [u32] {
         let ptr = (self.data & SLICE_PTR_MASK) as *mut u32;
-        let len = self.slice_len();
+        let len = (1 << (((self.data & SLICE_LEN_MASK) >> SLICE_LEN_OFFSET) + 1)) + 1;
         unsafe { slice::from_raw_parts_mut(ptr, len) }
     }
 
-    /// Return underlying slice of sparse or dense representation
+    /// Return mutable underlying slice of dense representation
     #[inline]
-    pub(crate) fn as_slice(&self) -> &[u32] {
-        let ptr = (self.data & SLICE_PTR_MASK) as *const u32;
-        let len = self.slice_len();
-        unsafe { slice::from_raw_parts(ptr, len) }
+    fn as_mut_dense_slice(&mut self) -> &mut [u32] {
+        let ptr = (self.data & SLICE_PTR_MASK) as *mut u32;
+        unsafe { slice::from_raw_parts_mut(ptr, Self::DENSE_LEN) }
     }
 
     /// Return cardinality estimate of sparse representation
     #[inline]
     fn estimate_sparse(&self) -> usize {
-        let data = self.as_slice();
+        let data = self.as_sparse_slice();
         data[0] as usize
     }
 
     /// Insert encoded hash into dense representation
     #[inline]
-    fn insert_into_dense(data: &mut [u32], h: u32) {
-        let (idx, new_rank) = Self::decode_hash(h);
+    fn insert_into_dense(data: &mut [u32], idx: u32, new_rank: u32) {
         let old_rank = get_register::<W>(data, idx);
         if new_rank > old_rank {
             set_register::<W>(data, idx, old_rank, new_rank);
@@ -461,7 +477,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Return cardinality estimate of dense representation
     #[inline]
     fn estimate_dense(&self) -> usize {
-        let data = self.as_slice();
+        let data = self.as_dense_slice();
         let zeros = data[0];
         let sum = f32::from_bits(data[1]) as f64;
         let estimate = alpha(Self::M) * ((Self::M * (Self::M - zeros as usize)) as f64)
@@ -471,9 +487,12 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
 
     /// Return memory size of `CardinalityEstimator`
     pub fn size_of(&self) -> usize {
-        match (self.is_small(), self.is_sparse()) {
-            (true, false) => size_of::<Self>(),
-            (_, _) => size_of::<Self>() + size_of_val(self.as_slice()),
+        if self.is_small() {
+            size_of::<Self>()
+        } else if self.is_sparse() {
+            size_of::<Self>() + size_of_val(self.as_sparse_slice())
+        } else {
+            size_of::<Self>() + size_of_val(self.as_dense_slice())
         }
     }
 }
@@ -507,7 +526,11 @@ impl<const P: usize, const W: usize, H: Default + Hasher> Drop for CardinalityEs
     /// Free memory occupied by `CardinalityEstimator`
     fn drop(&mut self) {
         if !self.is_small() {
-            drop(unsafe { Box::from_raw(self.as_mut_slice()) });
+            if self.is_sparse() {
+                drop(unsafe { Box::from_raw(self.as_mut_sparse_slice()) });
+            } else {
+                drop(unsafe { Box::from_raw(self.as_mut_dense_slice()) });
+            }
         }
     }
 }
@@ -520,7 +543,11 @@ impl<const P: usize, const W: usize, H: Default + Hasher> PartialEq
         if self.is_small() {
             self.data == rhs.data
         } else {
-            self.as_slice() == rhs.as_slice()
+            match (self.is_sparse(), rhs.is_sparse()) {
+                (true, true) => self.as_sparse_slice() == rhs.as_sparse_slice(),
+                (false, false) => self.as_dense_slice() == rhs.as_dense_slice(),
+                _ => false,
+            }
         }
     }
 }
@@ -574,17 +601,15 @@ fn bextr32(v: u32, start: usize, length: usize) -> u32 {
 #[inline]
 fn get_register<const W: usize>(data: &[u32], idx: u32) -> u32 {
     let bit_idx = (idx as usize) * W;
-    let u32_idx = (bit_idx >> 5) + 2;
-    let bit_offset = bit_idx & 31;
-    let bits_left = 32 - bit_offset;
-    if bits_left >= W {
-        // register rank fits into single `u32`
-        bextr32(data[u32_idx], bit_offset, W)
-    } else {
-        // register rank spread across two `u32`
-        bextr32(data[u32_idx], bit_offset, bits_left)
-            | bextr32(data[u32_idx + 1], 0, W - bits_left) << bits_left
-    }
+    let u32_idx = (bit_idx / 32) + 2;
+    let bit_pos = bit_idx % 32;
+    let bits = unsafe { data.get_unchecked(u32_idx..u32_idx + 2) };
+    let bits_1 = W.min(32 - bit_pos);
+    let bits_2 = W - bits_1;
+    let mask_1 = (1 << bits_1) - 1;
+    let mask_2 = (1 << bits_2) - 1;
+
+    ((bits[0] >> bit_pos) & mask_1) | ((bits[1] & mask_2) << bits_1)
 }
 
 /// Set HyperLogLog `idx` register to new value `rank`
@@ -597,8 +622,8 @@ fn set_register<const W: usize>(data: &mut [u32], idx: u32, old_rank: u32, new_r
     let bits = unsafe { data.get_unchecked_mut(u32_idx..u32_idx + 2) };
     let bits_1 = W.min(32 - bit_pos);
     let bits_2 = W - bits_1;
-    let mask_1 = u32::MAX >> (32 - bits_1);
-    let mask_2 = (1u32 << bits_2) - 1;
+    let mask_1 = (1 << bits_1) - 1;
+    let mask_2 = (1 << bits_2) - 1;
 
     // Unconditionally update two `u32` elements based on `new_rank` bits and masks
     bits[0] &= !(mask_1 << bit_pos);
@@ -607,12 +632,13 @@ fn set_register<const W: usize>(data: &mut [u32], idx: u32, old_rank: u32, new_r
     bits[1] |= (new_rank >> bits_1) & mask_2;
 
     // Update HyperLogLog's number of zero registers and harmonic sum
-    data[0] -= (old_rank == 0) as u32 & (data[0] > 0) as u32;
+    let zeros_and_sum = unsafe { data.get_unchecked_mut(0..2) };
+    zeros_and_sum[0] -= (old_rank == 0) as u32 & (zeros_and_sum[0] > 0) as u32;
 
-    let mut sum = f32::from_bits(data[1]);
+    let mut sum = f32::from_bits(zeros_and_sum[1]);
     sum -= 1.0 / ((1u64 << (old_rank as u64)) as f32);
     sum += 1.0 / ((1u64 << (new_rank as u64)) as f32);
-    data[1] = sum.to_bits();
+    zeros_and_sum[1] = sum.to_bits();
 }
 
 #[cfg(test)]

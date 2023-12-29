@@ -27,7 +27,7 @@
 //!
 //! ## High accuracy
 //! - For small cardinality range (<= 512 for P = 12, W = 6)
-//!   cardinality counted precisely (within hash collisions chance)
+//!   cardinality counted very accurately (within hash collisions chance)
 //! - For large cardinality range HyperLogLog++ is used with LogLog-Beta bias correction.
 //!   - Expected error:
 //!     P = 10, W = 5: 1.04 / sqrt(2^10) = 3.25%
@@ -76,14 +76,14 @@
 //! - data[1]       - stores harmonic sum of HyperLogLog registers (`f32` transmuted into `u32`).
 //! - data[2..]     - stores register ranks using `W` bits per each register.
 
-use std::hash::{Hash, Hasher};
-use std::marker::PhantomData;
+use std::fmt::Debug;
+use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 use std::mem::{size_of, size_of_val};
 use std::slice;
 
 use crate::beta::beta_horner;
 
-use xxhash_rust::xxh3::Xxh3;
+use wyhash::WyHash;
 
 /// Mask used to check whether cardinality estimator uses small representation
 const SMALL_MASK: usize = 0x8000_0000_0000_0000;
@@ -101,12 +101,15 @@ const SLICE_LEN_OFFSET: usize = 59;
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
 #[derive(Debug)]
-pub struct CardinalityEstimator<const P: usize = 12, const W: usize = 6, H: Hasher + Default = Xxh3>
-{
+pub struct CardinalityEstimator<
+    const P: usize = 12,
+    const W: usize = 6,
+    H: Hasher + Default = WyHash,
+> {
     /// Raw data format described above
     pub(crate) data: usize,
-    /// Phantom field for the hasher
-    _phantom_hasher: PhantomData<H>,
+    /// Zero-sized build hasher
+    build_hasher: BuildHasherDefault<H>,
 }
 
 impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P, W, H> {
@@ -114,8 +117,6 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
     /// Number of HyperLogLog registers
     const M: usize = 1 << P;
-    /// Sparse precision
-    const SP: usize = 25;
     /// Dense representation slice length
     const DENSE_LEN: usize = Self::M * W / 32 + 3;
 
@@ -128,7 +129,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         Self {
             // Start with empty small representation
             data: SMALL_MASK,
-            _phantom_hasher: PhantomData,
+            build_hasher: BuildHasherDefault::default(),
         }
     }
 
@@ -143,16 +144,34 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Insert hash into `CardinalityEstimator`
     #[inline]
     pub fn insert_hash(&mut self, hash: u64) {
-        let h = Self::encode_hash(hash);
-        self.insert_encoded_hash(h);
+        if self.is_small() {
+            let h = Self::encode_hash(hash);
+            // Skip inserting zero hash (useful to simplify merges)
+            if h == 0 {
+                return;
+            }
+            self.insert_into_small(h);
+        } else if self.is_sparse() {
+            let h = Self::encode_hash(hash);
+            // Skip inserting zero hash (useful to simplify merges)
+            if h == 0 {
+                return;
+            }
+            self.insert_into_sparse(h);
+        } else {
+            let idx = (hash & ((1 << P) - 1)) as u32;
+            let rank = (!hash >> P).trailing_zeros() + 1;
+            Self::insert_into_dense(self.as_mut_dense_slice(), idx, rank);
+        }
     }
 
     /// Insert a hashable item into `CardinalityEstimator`
     #[inline]
-    pub fn insert<T: Hash>(&mut self, item: T) {
-        let mut hasher = H::default();
+    pub fn insert<T: Hash + ?Sized>(&mut self, item: &T) {
+        let mut hasher = self.build_hasher.build_hasher();
         item.hash(&mut hasher);
-        self.insert_hash(hasher.finish());
+        let hash = hasher.finish();
+        self.insert_hash(hash);
     }
 
     /// Insert encoded hash into `CardinalityEstimator`
@@ -275,27 +294,16 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         }
         // Retrieve 2-nd encoded hash
         let h2 = self.small_h2();
-        if h2 != 0 {
-            if h2 == h {
-                return;
-            }
-            // 2-nd hash occupied -> upgrade to sparse representation
-            self.replace_data(vec![3, h1, h2, h, 0]);
+        if h2 == 0 {
+            self.data |= (h as usize) << 32;
             return;
         }
-        if h & 1 == 0 {
-            // 2-nd hash fits into 31 bits (99.9%+ cases)
-            self.data |= ((h as usize) >> 1) << 32;
+        if h2 == h {
             return;
         }
-        if h1 & 1 == 0 {
-            // 1-st and 2-nd hash can be swapped as 1-st hash fits into 31 bits
-            self.data = SMALL_MASK | (((h1 as usize) >> 1) << 32) | (h as usize);
-            return;
-        }
-        // neither 1-st or 2-nd hash fit into 31 bits -> upgrade to sparse representation.
-        // this is very rare scenario with probability of 1 in 2^(SP-P)
-        self.replace_data(vec![2, h1, h, 0, 0]);
+
+        // both hashes occupied -> upgrade to sparse representation
+        self.replace_data(vec![3, h1, h2, h, 0]);
     }
 
     /// Insert encoded hash into sparse representation
@@ -373,27 +381,17 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Compute the sparse encoding of the given hash
     #[inline]
     fn encode_hash(hash: u64) -> u32 {
-        let idx = bextr64(hash, 64 - Self::SP, Self::SP) as u32;
-        if bextr64(hash, 64 - Self::SP, Self::SP - P) == 0 {
-            let tmp = (bextr64(hash, 0, 64 - Self::SP) << Self::SP) | ((1 << Self::SP) - 1);
-            let zeros = tmp.leading_zeros() + 1;
-            return (idx << 7) | (zeros << 1) | 1;
-        }
-        idx << 1
+        let idx = (hash as u32) & ((1 << (32 - W - 1)) - 1);
+        let rank = (!hash >> P).trailing_zeros() + 1;
+        (idx << W) | rank
     }
 
     /// Return normal index and rank from encoded sparse hash
     #[inline]
     fn decode_hash(h: u32) -> (u32, u32) {
-        if h & 1 == 1 {
-            let idx = bextr32(h, 32 - P, P);
-            let rank = bextr32(h, 1, W) + (Self::SP - P) as u32;
-            (idx, rank)
-        } else {
-            let idx = bextr32(h, Self::SP - P + 1, P);
-            let rank = ((h << (32 - Self::SP + P - 1)) as u64).leading_zeros() - 31;
-            (idx, rank)
-        }
+        let rank = h & ((1 << W) - 1);
+        let idx = (h >> W) & ((1 << P) - 1);
+        (idx, rank)
     }
 
     /// Return cardinality estimate of small representation
@@ -508,21 +506,21 @@ impl<const P: usize, const W: usize, H: Hasher + Default> Default
 impl<const P: usize, const W: usize> Clone for CardinalityEstimator<P, W> {
     /// Clone `CardinalityEstimator`
     fn clone(&self) -> Self {
-        match self.is_small() {
-            true => Self {
+        if self.is_small() {
+            Self {
                 data: self.data,
-                _phantom_hasher: PhantomData,
-            },
-            false => {
-                let mut estimator = Self::new();
-                estimator.merge(self);
-                estimator
+                build_hasher: BuildHasherDefault::default(),
             }
+        } else {
+            // todo: is this the best we can do - use simpler copy instead
+            let mut estimator = Self::new();
+            estimator.merge(self);
+            estimator
         }
     }
 }
 
-impl<const P: usize, const W: usize, H: Default + Hasher> Drop for CardinalityEstimator<P, W, H> {
+impl<const P: usize, const W: usize, H: Hasher + Default> Drop for CardinalityEstimator<P, W, H> {
     /// Free memory occupied by `CardinalityEstimator`
     fn drop(&mut self) {
         if !self.is_small() {
@@ -535,7 +533,7 @@ impl<const P: usize, const W: usize, H: Default + Hasher> Drop for CardinalityEs
     }
 }
 
-impl<const P: usize, const W: usize, H: Default + Hasher> PartialEq
+impl<const P: usize, const W: usize, H: Hasher + Default> PartialEq
     for CardinalityEstimator<P, W, H>
 {
     /// Compare cardinality estimators
@@ -583,18 +581,6 @@ fn alpha(m: usize) -> f64 {
         64 => 0.709,
         _ => 0.7213 / (1.0 + 1.079 / (m as f64)),
     }
-}
-
-/// Extract `length` bits from a bit starting at `start` from `u64` integer
-#[inline]
-fn bextr64(v: u64, start: usize, length: usize) -> u64 {
-    (v >> start) & ((1 << length) - 1)
-}
-
-/// Extract `length` bits from a bit starting at `start` from `u32` integer
-#[inline]
-fn bextr32(v: u32, start: usize, length: usize) -> u32 {
-    (v >> start) & ((1 << length) - 1)
 }
 
 /// Get HyperLogLog `idx` register
@@ -654,11 +640,11 @@ pub mod tests {
     #[test_case(8 => (44, 0.0))]
     #[test_case(16 => (76, 0.0))]
     #[test_case(128 => (524, 0.0))]
-    #[test_case(256 => (660, 0.01428608717942597))]
-    #[test_case(512 => (660, 0.013023788120268947))]
-    #[test_case(1024 => (660, 0.014517720556272953))]
-    #[test_case(10_000 => (660, 0.02614431358700056))]
-    #[test_case(100_000 => (660, 0.016867961360547964))]
+    #[test_case(256 => (660, 0.00848571681056438))]
+    #[test_case(512 => (660, 0.012462702490331934))]
+    #[test_case(1024 => (660, 0.01572779597706473))]
+    #[test_case(10_000 => (660, 0.02800496733678481))]
+    #[test_case(100_000 => (660, 0.035095610881982486))]
     fn test_estimator_p10_w5(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<10, 5>::new(), n)
     }
@@ -672,10 +658,10 @@ pub mod tests {
     #[test_case(16 => (76, 0.0))]
     #[test_case(256 => (1036, 0.0))]
     #[test_case(512 => (2060, 0.0))]
-    #[test_case(1024 => (3092, 0.002375373334168125))]
-    #[test_case(4096 => (3092, 0.003105140671097913))]
-    #[test_case(10_000 => (3092, 0.0051820599485679466))]
-    #[test_case(100_000 => (3092, 0.011020222347468332))]
+    #[test_case(1024 => (3092, 0.010428020632880222))]
+    #[test_case(4096 => (3092, 0.008446164536669186))]
+    #[test_case(10_000 => (3092, 0.009024289948972178))]
+    #[test_case(100_000 => (3092, 0.018026741498952652))]
     fn test_estimator_p12_w6(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<12, 6>::new(), n)
     }
@@ -690,9 +676,9 @@ pub mod tests {
     #[test_case(256 => (1036, 0.0))]
     #[test_case(512 => (2060, 0.0))]
     #[test_case(1024 => (4108, 0.0))]
-    #[test_case(4096 => (16396, 0.0))]
-    #[test_case(8192 => (32780, 5.3602457823617544e-6))]
-    #[test_case(10_000 => (65548, 2.4330815282868074e-5))]
+    #[test_case(4096 => (16396, 0.00018528452220919765))]
+    #[test_case(8192 => (32780, 0.00017724848487978462))]
+    #[test_case(10_000 => (65548, 0.0001651447681800971))]
     fn test_estimator_p18_w6(n: usize) -> (usize, f64) {
         evaluate_cardinality_estimator(CardinalityEstimator::<18, 6>::new(), n)
     }
@@ -703,7 +689,7 @@ pub mod tests {
     ) -> (usize, f64) {
         let mut total_relative_error: f64 = 0.0;
         for i in 0..n {
-            e.insert(i);
+            e.insert(&i);
             let estimate = e.estimate() as f64;
             let actual = (i + 1) as f64;
             let error = estimate - actual;
@@ -742,28 +728,28 @@ pub mod tests {
     #[test_case(512, 0 => 512)]
     #[test_case(0, 512 => 512)]
     // cases with error > 0%
-    #[test_case(512, 1 => 508)]
-    #[test_case(1, 512 => 520)]
-    #[test_case(512, 512 => 1031)]
-    #[test_case(513, 513 => 1032)]
-    #[test_case(10000, 0 => 10183)]
-    #[test_case(0, 10000 => 9882)]
-    #[test_case(4, 10000 => 9892)]
-    #[test_case(512, 10000 => 10455)]
-    #[test_case(10000, 10000 => 19569)]
+    #[test_case(512, 1 => 516)]
+    #[test_case(1, 512 => 495)]
+    #[test_case(512, 512 => 1011)]
+    #[test_case(513, 513 => 1010)]
+    #[test_case(10000, 0 => 9901)]
+    #[test_case(0, 10000 => 9894)]
+    #[test_case(4, 10000 => 9896)]
+    #[test_case(512, 10000 => 10366)]
+    #[test_case(10000, 10000 => 19889)]
     fn test_merge(lhs_n: usize, rhs_n: usize) -> usize {
         let mut lhs = CardinalityEstimator::<12, 6>::new();
         let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 1];
         for i in 0..lhs_n {
             buf[..8].copy_from_slice(&i.to_le_bytes());
-            lhs.insert(buf);
+            lhs.insert(&buf);
         }
 
         let mut rhs = CardinalityEstimator::<12, 6>::new();
         let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 2];
         for i in 0..rhs_n {
             buf[..8].copy_from_slice(&i.to_le_bytes());
-            rhs.insert(buf);
+            rhs.insert(&buf);
         }
 
         lhs.merge(&rhs);

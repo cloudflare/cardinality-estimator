@@ -99,6 +99,8 @@ const MAX_SLICE_CAPACITY: usize = 16;
 const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
 /// Mask used for accessing heap allocated data stored at the pointer in `data` field.
 const PTR_MASK: usize = 0x00ff_ffff_ffff_fffc;
+/// Mask used for extracting hashes stored in small representation (31 bits)
+const SMALL_MASK: usize = 0x0000_0000_7fff_ffff;
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
@@ -201,77 +203,86 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Merge cardinality estimators
     #[inline]
     pub fn merge(&mut self, rhs: &Self) {
-        match (self.is_small(), rhs.is_small()) {
-            (_, true) => {
-                // when `rhs` has small representation - just insert 2 hashes into `self`
-                self.insert_encoded_hash(rhs.small_h1());
-                self.insert_encoded_hash(rhs.small_h2());
+        match (self.representation(), rhs.representation()) {
+            (_, Small) => {
+                let h1 = rhs.small_h1();
+                let h2 = rhs.small_h2();
+                if h1 != 0 {
+                    self.insert_encoded_hash(h1);
+                }
+                if h2 != 0 {
+                    self.insert_encoded_hash(h2);
+                }
             }
-            (true, false) => {
-                // when `self` has small representation - save 2 hashes into variables,
-                // make copy of `rhs` slice into `self` and then insert saved hashes
+            (_, Slice) => {
+                for &h in &rhs.as_slice()[..rhs.slice_len()] {
+                    self.insert_encoded_hash(h);
+                }
+            }
+            (_, HashSet) => {
+                for &h in rhs.as_hashset() {
+                    self.insert_encoded_hash(h);
+                }
+            }
+            (Small, HyperLogLog) => {
+                let mut data = rhs.as_hll_slice().to_vec();
                 let h1 = self.small_h1();
                 let h2 = self.small_h2();
-                let rhs_data = if rhs.is_sparse() {
-                    Vec::from(rhs.as_sparse_slice())
-                } else {
-                    Vec::from(rhs.as_dense_slice())
-                };
-                self.replace_data(rhs_data);
-                self.insert_encoded_hash(h1);
-                self.insert_encoded_hash(h2);
+                if h1 != 0 {
+                    let (idx, rank) = Self::decode_hash(h1);
+                    Self::insert_into_hll(&mut data, idx, rank);
+                }
+                if h2 != 0 {
+                    let (idx, rank) = Self::decode_hash(h2);
+                    Self::insert_into_hll(&mut data, idx, rank);
+                }
+                self.set_hll_data(data);
             }
-            (false, false) => match (self.is_sparse(), rhs.is_sparse()) {
-                (_, true) => {
-                    // when `rhs` has sparse representation - just insert its hashes into `self`
-                    let rhs_data = rhs.as_sparse_slice();
-                    let rhs_len = rhs_data[0] as usize;
-                    rhs_data[1..rhs_len + 1]
-                        .iter()
-                        .for_each(|h| self.insert_encoded_hash(*h));
+            (Slice, HyperLogLog) => {
+                let slice_len = self.slice_len();
+                let slice_data = self.as_slice_mut();
+                let mut data = rhs.as_hll_slice().to_vec();
+                for &h in &slice_data[..slice_len] {
+                    let (idx, rank) = Self::decode_hash(h);
+                    Self::insert_into_hll(&mut data, idx, rank);
                 }
-                (true, false) => {
-                    // when `self` has sparse representation - save its hashes into vector,
-                    // make copy of `rhs` slice into `self` and then insert saved hashes
-                    let lhs_data = self.as_sparse_slice();
-                    let lhs_len = lhs_data[0] as usize;
-                    let lhs_hashes = Vec::from(&lhs_data[1..lhs_len + 1]);
-                    let rhs_data = rhs.as_dense_slice();
-                    self.replace_data(Vec::from(rhs_data));
-                    lhs_hashes.iter().for_each(|h| self.insert_encoded_hash(*h));
+                drop(unsafe { Box::from_raw(slice_data) });
+                self.set_hll_data(data);
+            }
+            (HashSet, HyperLogLog) => {
+                let hashset_data = self.as_hashset_mut();
+                let mut data = rhs.as_hll_slice().to_vec();
+                for &h in hashset_data.iter() {
+                    let (idx, rank) = Self::decode_hash(h);
+                    Self::insert_into_hll(&mut data, idx, rank);
                 }
-                (false, false) => {
-                    // when both estimators have dense HyperLogLog representation
-                    let lhs_data = self.as_mut_dense_slice();
-                    let rhs_data = rhs.as_dense_slice();
-                    Self::merge_dense(lhs_data, rhs_data);
+                drop(unsafe { Box::from_raw(hashset_data) });
+                self.set_hll_data(data);
+            }
+            (HyperLogLog, HyperLogLog) => {
+                let lhs_data = self.as_hll_slice_mut();
+                let rhs_data = rhs.as_hll_slice();
+                for idx in 0..Self::M as u32 {
+                    let lhs_rank = get_register::<W>(lhs_data, idx);
+                    let rhs_rank = get_register::<W>(rhs_data, idx);
+                    if rhs_rank > lhs_rank {
+                        set_register::<W>(lhs_data, idx, lhs_rank, rhs_rank);
+                    }
                 }
-            },
+            }
         }
-    }
-
-    /// Return whether small representation is used
-    #[inline]
-    pub(crate) fn is_small(&self) -> bool {
-        self.data & SMALL_MASK != 0
-    }
-
-    /// Return whether sparse representation is used
-    #[inline]
-    fn is_sparse(&self) -> bool {
-        self.data & SLICE_LEN_MASK != 0
     }
 
     /// Return 1-st encoded hash assuming small representation
     #[inline]
     fn small_h1(&self) -> u32 {
-        (self.data & SMALL_1_MASK) as u32
+        ((self.data >> 2) & SMALL_MASK) as u32
     }
 
     /// Return 2-nd encoded hash assuming small representation
     #[inline]
     fn small_h2(&self) -> u32 {
-        ((self.data & SMALL_2_MASK) >> 31) as u32
+        ((self.data >> 33) & SMALL_MASK) as u32
     }
 
     /// Insert encoded hash into small representation
@@ -281,7 +292,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         // Retrieve 1-st encoded hash
         let h1 = self.small_h1();
         if h1 == 0 {
-            self.data |= h as usize;
+            self.data |= (h as usize) << 2;
             return;
         }
         if h1 == h {

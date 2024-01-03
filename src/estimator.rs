@@ -182,6 +182,17 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         self.insert_hash(hash);
     }
 
+    /// Insert hash into `CardinalityEstimator`
+    #[inline]
+    pub fn insert_hash(&mut self, hash: u64) {
+        match self.representation() {
+            Small => self.insert_into_small(hash),
+            Slice => self.insert_into_slice(hash),
+            HashSet => self.insert_into_set(hash),
+            HyperLogLog => self.insert_into_hll(hash),
+        }
+    }
+
     /// Insert encoded hash into `CardinalityEstimator`
     #[inline]
     fn insert_encoded_hash(&mut self, h: u32) {

@@ -618,7 +618,7 @@ fn get_register<const W: usize>(data: &[u32], idx: u32) -> u32 {
 
 /// Set HyperLogLog `idx` register to new value `rank`
 #[inline]
-fn set_register<const W: usize>(data: &mut [u32], idx: u32, new_rank: u32) {
+fn set_register<const W: usize>(data: &mut [u32], idx: u32, old_rank: u32, new_rank: u32) {
     let bit_idx = (idx as usize) * W;
     let u32_idx = (bit_idx / 32) + 2;
     let bit_pos = bit_idx % 32;
@@ -634,6 +634,15 @@ fn set_register<const W: usize>(data: &mut [u32], idx: u32, new_rank: u32) {
     bits[0] |= (new_rank & mask_1) << bit_pos;
     bits[1] &= !mask_2;
     bits[1] |= (new_rank >> bits_1) & mask_2;
+
+    // Update HyperLogLog's number of zero registers and harmonic sum
+    let zeros_and_sum = unsafe { data.get_unchecked_mut(0..2) };
+    zeros_and_sum[0] -= (old_rank == 0) as u32 & (zeros_and_sum[0] > 0) as u32;
+
+    let mut sum = f32::from_bits(zeros_and_sum[1]);
+    sum -= 1.0 / ((1u64 << (old_rank as u64)) as f32);
+    sum += 1.0 / ((1u64 << (new_rank as u64)) as f32);
+    zeros_and_sum[1] = sum.to_bits();
 }
 
 #[cfg(test)]

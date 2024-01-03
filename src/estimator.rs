@@ -95,6 +95,8 @@ use wyhash::WyHash;
 
 /// Maximum number of elements stored in slice representation
 const MAX_SLICE_CAPACITY: usize = 16;
+/// Mask used for storing and retrieving representation type stored in lowest 2 bits of `data` field.
+const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
@@ -136,41 +138,16 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
 
         Self {
             // Start with empty small representation
-            data: SMALL_MASK,
+            data: 0,
             build_hasher: BuildHasherDefault::default(),
         }
     }
 
-    /// Creates new instance of `CardinalityEstimator` from given `hash`
+    /// Return representation type of `CardinalityEstimator`
     #[inline]
-    pub fn from_hash(hash: u64) -> Self {
-        let mut estimator = Self::new();
-        estimator.insert_hash(hash);
-        estimator
-    }
-
-    /// Insert hash into `CardinalityEstimator`
-    #[inline]
-    pub fn insert_hash(&mut self, hash: u64) {
-        if self.is_small() {
-            let h = Self::encode_hash(hash);
-            // Skip inserting zero hash (useful to simplify merges)
-            if h == 0 {
-                return;
-            }
-            self.insert_into_small(h);
-        } else if self.is_sparse() {
-            let h = Self::encode_hash(hash);
-            // Skip inserting zero hash (useful to simplify merges)
-            if h == 0 {
-                return;
-            }
-            self.insert_into_sparse(h);
-        } else {
-            let idx = (hash & ((1 << P) - 1)) as u32;
-            let rank = (!hash >> P).trailing_zeros() + 1;
-            Self::insert_into_dense(self.as_mut_dense_slice(), idx, rank);
-        }
+    pub fn representation(&self) -> Representation {
+        // SAFETY: representation is always one of four types stored in lowest 2 bits of `data` field.
+        unsafe { std::mem::transmute((self.data & REPRESENTATION_MASK) as u8) }
     }
 
     /// Insert a hashable item into `CardinalityEstimator`

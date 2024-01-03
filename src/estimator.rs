@@ -651,61 +651,77 @@ pub mod tests {
     use super::*;
     use test_case::test_case;
 
-    #[test_case(0 => (8, 0.0))]
-    #[test_case(1 => (8, 0.0))]
-    #[test_case(2 => (8, 0.0))]
-    #[test_case(3 => (28, 0.0))]
-    #[test_case(4 => (28, 0.0))]
-    #[test_case(8 => (44, 0.0))]
-    #[test_case(16 => (76, 0.0))]
-    #[test_case(128 => (524, 0.0))]
-    #[test_case(256 => (660, 0.00848571681056438))]
-    #[test_case(512 => (660, 0.012462702490331934))]
-    #[test_case(1024 => (660, 0.01572779597706473))]
-    #[test_case(10_000 => (660, 0.02800496733678481))]
-    #[test_case(100_000 => (660, 0.035095610881982486))]
-    fn test_estimator_p10_w5(n: usize) -> (usize, f64) {
+    #[test_case(0 => "estimator = { representation: Small, estimate: 0, size: 8 } avg_err = 0.0000")]
+    #[test_case(1 => "estimator = { representation: Small, estimate: 1, size: 8 } avg_err = 0.0000")]
+    #[test_case(2 => "estimator = { representation: Small, estimate: 2, size: 8 } avg_err = 0.0000")]
+    #[test_case(3 => "estimator = { representation: Slice, estimate: 3, size: 24 } avg_err = 0.0000")]
+    #[test_case(4 => "estimator = { representation: Slice, estimate: 4, size: 24 } avg_err = 0.0000")]
+    #[test_case(8 => "estimator = { representation: Slice, estimate: 8, size: 40 } avg_err = 0.0000")]
+    #[test_case(16 => "estimator = { representation: Slice, estimate: 16, size: 72 } avg_err = 0.0000")]
+    #[test_case(17 => "estimator = { representation: HashSet, estimate: 17, size: 184 } avg_err = 0.0000")]
+    #[test_case(28 => "estimator = { representation: HashSet, estimate: 28, size: 184 } avg_err = 0.0000")]
+    #[test_case(29 => "estimator = { representation: HashSet, estimate: 29, size: 344 } avg_err = 0.0000")]
+    #[test_case(56 => "estimator = { representation: HashSet, estimate: 56, size: 344 } avg_err = 0.0000")]
+    #[test_case(57 => "estimator = { representation: HyperLogLog, estimate: 59, size: 660 } avg_err = 0.0006")]
+    #[test_case(128 => "estimator = { representation: HyperLogLog, estimate: 130, size: 660 } avg_err = 0.0092")]
+    #[test_case(256 => "estimator = { representation: HyperLogLog, estimate: 264, size: 660 } avg_err = 0.0165")]
+    #[test_case(512 => "estimator = { representation: HyperLogLog, estimate: 512, size: 660 } avg_err = 0.0174")]
+    #[test_case(1024 => "estimator = { representation: HyperLogLog, estimate: 1033, size: 660 } avg_err = 0.0184")]
+    #[test_case(10_000 => "estimator = { representation: HyperLogLog, estimate: 10417, size: 660 } avg_err = 0.0282")]
+    #[test_case(100_000 => "estimator = { representation: HyperLogLog, estimate: 93099, size: 660 } avg_err = 0.0351")]
+    fn test_estimator_p10_w5(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<10, 5>::new(), n)
     }
 
-    #[test_case(0 => (8, 0.0))]
-    #[test_case(1 => (8, 0.0))]
-    #[test_case(2 => (8, 0.0))]
-    #[test_case(3 => (28, 0.0))]
-    #[test_case(4 => (28, 0.0))]
-    #[test_case(8 => (44, 0.0))]
-    #[test_case(16 => (76, 0.0))]
-    #[test_case(256 => (1036, 0.0))]
-    #[test_case(512 => (2060, 0.0))]
-    #[test_case(1024 => (3092, 0.010428020632880222))]
-    #[test_case(4096 => (3092, 0.008446164536669186))]
-    #[test_case(10_000 => (3092, 0.009024289948972178))]
-    #[test_case(100_000 => (3092, 0.018026741498952652))]
-    fn test_estimator_p12_w6(n: usize) -> (usize, f64) {
+    #[test_case(0 => "estimator = { representation: Small, estimate: 0, size: 8 } avg_err = 0.0000")]
+    #[test_case(1 => "estimator = { representation: Small, estimate: 1, size: 8 } avg_err = 0.0000")]
+    #[test_case(2 => "estimator = { representation: Small, estimate: 2, size: 8 } avg_err = 0.0000")]
+    #[test_case(3 => "estimator = { representation: Slice, estimate: 3, size: 24 } avg_err = 0.0000")]
+    #[test_case(4 => "estimator = { representation: Slice, estimate: 4, size: 24 } avg_err = 0.0000")]
+    #[test_case(8 => "estimator = { representation: Slice, estimate: 8, size: 40 } avg_err = 0.0000")]
+    #[test_case(16 => "estimator = { representation: Slice, estimate: 16, size: 72 } avg_err = 0.0000")]
+    #[test_case(17 => "estimator = { representation: HashSet, estimate: 17, size: 184 } avg_err = 0.0000")]
+    #[test_case(28 => "estimator = { representation: HashSet, estimate: 28, size: 184 } avg_err = 0.0000")]
+    #[test_case(29 => "estimator = { representation: HashSet, estimate: 29, size: 344 } avg_err = 0.0000")]
+    #[test_case(56 => "estimator = { representation: HashSet, estimate: 56, size: 344 } avg_err = 0.0000")]
+    #[test_case(256 => "estimator = { representation: HashSet, estimate: 256, size: 2584 } avg_err = 0.0000")]
+    #[test_case(448 => "estimator = { representation: HashSet, estimate: 448, size: 2584 } avg_err = 0.0000")]
+    #[test_case(449 => "estimator = { representation: HyperLogLog, estimate: 442, size: 3092 } avg_err = 0.0000")]
+    #[test_case(512 => "estimator = { representation: HyperLogLog, estimate: 498, size: 3092 } avg_err = 0.0027")]
+    #[test_case(1024 => "estimator = { representation: HyperLogLog, estimate: 1012, size: 3092 } avg_err = 0.0110")]
+    #[test_case(4096 => "estimator = { representation: HyperLogLog, estimate: 4105, size: 3092 } avg_err = 0.0084")]
+    #[test_case(10_000 => "estimator = { representation: HyperLogLog, estimate: 10068, size: 3092 } avg_err = 0.0085")]
+    #[test_case(100_000 => "estimator = { representation: HyperLogLog, estimate: 95628, size: 3092 } avg_err = 0.0182")]
+    fn test_estimator_p12_w6(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<12, 6>::new(), n)
     }
 
-    #[test_case(0 => (8, 0.0))]
-    #[test_case(1 => (8, 0.0))]
-    #[test_case(2 => (8, 0.0))]
-    #[test_case(3 => (28, 0.0))]
-    #[test_case(4 => (28, 0.0))]
-    #[test_case(8 => (44, 0.0))]
-    #[test_case(16 => (76, 0.0))]
-    #[test_case(256 => (1036, 0.0))]
-    #[test_case(512 => (2060, 0.0))]
-    #[test_case(1024 => (4108, 0.0))]
-    #[test_case(4096 => (16396, 0.00018528452220919765))]
-    #[test_case(8192 => (32780, 0.00017724848487978462))]
-    #[test_case(10_000 => (65548, 0.0001651447681800971))]
-    fn test_estimator_p18_w6(n: usize) -> (usize, f64) {
+    #[test_case(0 => "estimator = { representation: Small, estimate: 0, size: 8 } avg_err = 0.0000")]
+    #[test_case(1 => "estimator = { representation: Small, estimate: 1, size: 8 } avg_err = 0.0000")]
+    #[test_case(2 => "estimator = { representation: Small, estimate: 2, size: 8 } avg_err = 0.0000")]
+    #[test_case(3 => "estimator = { representation: Slice, estimate: 3, size: 24 } avg_err = 0.0000")]
+    #[test_case(4 => "estimator = { representation: Slice, estimate: 4, size: 24 } avg_err = 0.0000")]
+    #[test_case(8 => "estimator = { representation: Slice, estimate: 8, size: 40 } avg_err = 0.0000")]
+    #[test_case(16 => "estimator = { representation: Slice, estimate: 16, size: 72 } avg_err = 0.0000")]
+    #[test_case(17 => "estimator = { representation: HashSet, estimate: 17, size: 184 } avg_err = 0.0000")]
+    #[test_case(28 => "estimator = { representation: HashSet, estimate: 28, size: 184 } avg_err = 0.0000")]
+    #[test_case(29 => "estimator = { representation: HashSet, estimate: 29, size: 344 } avg_err = 0.0000")]
+    #[test_case(56 => "estimator = { representation: HashSet, estimate: 56, size: 344 } avg_err = 0.0000")]
+    #[test_case(256 => "estimator = { representation: HashSet, estimate: 256, size: 2584 } avg_err = 0.0000")]
+    #[test_case(448 => "estimator = { representation: HashSet, estimate: 448, size: 2584 } avg_err = 0.0000")]
+    #[test_case(896 => "estimator = { representation: HashSet, estimate: 896, size: 5144 } avg_err = 0.0000")]
+    #[test_case(4096 => "estimator = { representation: HashSet, estimate: 4095, size: 40984 } avg_err = 0.0002")]
+    #[test_case(8192 => "estimator = { representation: HashSet, estimate: 8191, size: 81944 } avg_err = 0.0002")]
+    #[test_case(10_000 => "estimator = { representation: HashSet, estimate: 9999, size: 81944 } avg_err = 0.0002")]
+    #[test_case(100_000 => "estimator = { representation: HyperLogLog, estimate: 100240, size: 196628 } avg_err = 0.0010")]
+    fn test_estimator_p18_w6(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<18, 6>::new(), n)
     }
 
     fn evaluate_cardinality_estimator<const P: usize, const W: usize>(
         mut e: CardinalityEstimator<P, W>,
         n: usize,
-    ) -> (usize, f64) {
+    ) -> String {
         let mut total_relative_error: f64 = 0.0;
         for i in 0..n {
             e.insert(&i);
@@ -717,9 +733,8 @@ pub mod tests {
         }
 
         let avg_relative_error = total_relative_error / ((n + 1) as f64);
-        let size = e.size_of();
 
-        (size, avg_relative_error)
+        format!("estimator = {:?} avg_err = {:.4}", e, avg_relative_error)
     }
 
     // cases with error = 0%

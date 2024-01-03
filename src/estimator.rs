@@ -97,6 +97,8 @@ use wyhash::WyHash;
 const MAX_SLICE_CAPACITY: usize = 16;
 /// Mask used for storing and retrieving representation type stored in lowest 2 bits of `data` field.
 const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
+/// Mask used for accessing heap allocated data stored at the pointer in `data` field.
+const PTR_MASK: usize = 0x00ff_ffff_ffff_fffc;
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
@@ -162,40 +164,37 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Insert hash into `CardinalityEstimator`
     #[inline]
     pub fn insert_hash(&mut self, hash: u64) {
-        match self.representation() {
-            Small => self.insert_into_small(hash),
-            Slice => self.insert_into_slice(hash),
-            HashSet => self.insert_into_set(hash),
-            HyperLogLog => self.insert_into_hll(hash),
+        if self.representation() == HyperLogLog {
+            let idx = (hash & ((1 << P) - 1)) as u32;
+            let rank = (!hash >> P).trailing_zeros() + 1;
+            Self::insert_into_hll(self.as_hll_slice_mut(), idx, rank);
+        } else {
+            self.insert_encoded_hash(Self::encode_hash(hash));
         }
     }
 
     /// Insert encoded hash into `CardinalityEstimator`
     #[inline]
     fn insert_encoded_hash(&mut self, h: u32) {
-        // Skip inserting zero hash (useful to simplify merges)
-        if h == 0 {
-            return;
-        }
-        if self.is_small() {
-            self.insert_into_small(h);
-        } else if self.is_sparse() {
-            self.insert_into_sparse(h);
-        } else {
-            let (idx, new_rank) = Self::decode_hash(h);
-            Self::insert_into_dense(self.as_mut_dense_slice(), idx, new_rank);
+        match self.representation() {
+            Small => self.insert_into_small(h),
+            Slice => self.insert_into_slice(h),
+            HashSet => self.insert_into_set(h),
+            HyperLogLog => {
+                let (idx, rank) = Self::decode_hash(h);
+                Self::insert_into_hll(self.as_hll_slice_mut(), idx, rank);
+            }
         }
     }
 
     /// Return cardinality estimate
     #[inline]
     pub fn estimate(&self) -> usize {
-        if self.is_small() {
-            self.estimate_small()
-        } else if self.is_sparse() {
-            self.estimate_sparse()
-        } else {
-            self.estimate_dense()
+        match self.representation() {
+            Small => self.estimate_small(),
+            Slice => self.slice_len(),
+            HashSet => self.as_hashset().len(),
+            HyperLogLog => self.estimate_hll(),
         }
     }
 
@@ -400,89 +399,69 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         }
     }
 
-    /// Return encoded slice len based on specified slice length
+    /// Return cardinality estimate of slice representation
     #[inline]
-    fn encoded_slice_len(&self, data: &[u32]) -> usize {
-        if data.len() < Self::DENSE_LEN {
-            ((data.len() - 1).trailing_zeros() as usize - 1) << SLICE_LEN_OFFSET
-        } else {
-            0
-        }
+    fn slice_len(&self) -> usize {
+        self.data >> 56
     }
 
-    /// Return underlying slice of sparse representation
+    /// Return underlying slice of `u32` for slice representation
     #[inline]
-    pub(crate) fn as_sparse_slice(&self) -> &[u32] {
-        let ptr = (self.data & SLICE_PTR_MASK) as *const u32;
-        let len = (1 << (((self.data & SLICE_LEN_MASK) >> SLICE_LEN_OFFSET) + 1)) + 1;
-        unsafe { slice::from_raw_parts(ptr, len) }
+    fn as_slice(&self) -> &[u32] {
+        let ptr = (self.data & PTR_MASK) as *const u32;
+        let cap = self.slice_len().next_power_of_two();
+        unsafe { slice::from_raw_parts(ptr, cap) }
     }
 
-    /// Return underlying slice of dense representation
+    /// Return mutable underlying slice of `u32` for slice representation
     #[inline]
-    pub(crate) fn as_dense_slice(&self) -> &[u32] {
-        let ptr = (self.data & SLICE_PTR_MASK) as *const u32;
-        unsafe { slice::from_raw_parts(ptr, Self::DENSE_LEN) }
+    fn as_slice_mut(&mut self) -> &mut [u32] {
+        let ptr = (self.data & PTR_MASK) as *mut u32;
+        let cap = self.slice_len().next_power_of_two();
+        unsafe { slice::from_raw_parts_mut(ptr, cap) }
     }
 
-    /// Return mutable underlying slice of sparse
+    /// Return underlying `HashSet` of `u32` for hashset representation
     #[inline]
-    fn as_mut_sparse_slice(&mut self) -> &mut [u32] {
-        let ptr = (self.data & SLICE_PTR_MASK) as *mut u32;
-        let len = (1 << (((self.data & SLICE_LEN_MASK) >> SLICE_LEN_OFFSET) + 1)) + 1;
-        unsafe { slice::from_raw_parts_mut(ptr, len) }
+    fn as_hashset(&self) -> &HashSet<u32> {
+        unsafe { &*((self.data & PTR_MASK) as *const HashSet<u32>) }
     }
 
-    /// Return mutable underlying slice of dense representation
+    /// Return mutable underlying `HashSet` of `u32` for hashset representation
     #[inline]
-    fn as_mut_dense_slice(&mut self) -> &mut [u32] {
-        let ptr = (self.data & SLICE_PTR_MASK) as *mut u32;
-        unsafe { slice::from_raw_parts_mut(ptr, Self::DENSE_LEN) }
+    fn as_hashset_mut(&mut self) -> &mut HashSet<u32> {
+        unsafe { &mut *((self.data & PTR_MASK) as *mut HashSet<u32>) }
     }
 
-    /// Return cardinality estimate of sparse representation
+    /// Return underlying slice of `u32` for HyperLogLog representation
     #[inline]
-    fn estimate_sparse(&self) -> usize {
-        let data = self.as_sparse_slice();
-        data[0] as usize
+    fn as_hll_slice(&self) -> &[u32] {
+        let ptr = (self.data & PTR_MASK) as *const u32;
+        unsafe { slice::from_raw_parts(ptr, Self::HLL_SLICE_LEN) }
     }
 
-    /// Insert encoded hash into dense representation
+    /// Return mutable underlying slice of `u32` for HyperLogLog representation
     #[inline]
-    fn insert_into_dense(data: &mut [u32], idx: u32, new_rank: u32) {
+    fn as_hll_slice_mut(&mut self) -> &mut [u32] {
+        let ptr = (self.data & PTR_MASK) as *mut u32;
+        unsafe { slice::from_raw_parts_mut(ptr, Self::HLL_SLICE_LEN) }
+    }
+
+    /// Insert encoded hash into HyperLogLog representation
+    #[inline]
+    fn insert_into_hll(data: &mut [u32], idx: u32, new_rank: u32) {
         let old_rank = get_register::<W>(data, idx);
         if new_rank > old_rank {
-            set_register::<W>(data, idx, new_rank);
-
-            // Update HyperLogLog's number of zero registers and harmonic sum
-            let zeros_and_sum = unsafe { data.get_unchecked_mut(0..2) };
-            zeros_and_sum[0] -= (old_rank == 0) as u32 & (zeros_and_sum[0] > 0) as u32;
-
-            let mut sum = f32::from_bits(zeros_and_sum[1]);
-            sum -= 1.0 / ((1u64 << (old_rank as u64)) as f32);
-            sum += 1.0 / ((1u64 << (new_rank as u64)) as f32);
-            zeros_and_sum[1] = sum.to_bits();
+            set_register::<W>(data, idx, old_rank, new_rank);
         }
     }
 
-    /// Merge two dense HyperLogLog representations
+    /// Return cardinality estimate of HyperLogLog representation
     #[inline]
-    fn merge_dense(lhs: &mut [u32], rhs: &[u32]) {
-        for idx in 0..Self::M as u32 {
-            let lhs_rank = get_register::<W>(lhs, idx);
-            let rhs_rank = get_register::<W>(rhs, idx);
-            if rhs_rank > lhs_rank {
-                set_register::<W>(lhs, idx, lhs_rank, rhs_rank);
-            }
-        }
-    }
-
-    /// Return cardinality estimate of dense representation
-    #[inline]
-    fn estimate_dense(&self) -> usize {
-        let data = self.as_dense_slice();
-        let zeros = data[0];
-        let sum = f32::from_bits(data[1]) as f64;
+    fn estimate_hll(&self) -> usize {
+        let data = self.as_hll_slice();
+        let zeros = unsafe { *data.get_unchecked(0) };
+        let sum = f32::from_bits(unsafe { *data.get_unchecked(1) }) as f64;
         let estimate = alpha(Self::M) * ((Self::M * (Self::M - zeros as usize)) as f64)
             / (sum + beta_horner(zeros as f64, P));
         (estimate + 0.5) as usize

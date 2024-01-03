@@ -511,31 +511,28 @@ impl<const P: usize, const W: usize, H: Hasher + Default> Default
     }
 }
 
-impl<const P: usize, const W: usize> Clone for CardinalityEstimator<P, W> {
+impl<const P: usize, const W: usize, H: Hasher + Default> Clone for CardinalityEstimator<P, W, H> {
     /// Clone `CardinalityEstimator`
     fn clone(&self) -> Self {
-        if self.is_small() {
-            Self {
-                data: self.data,
-                build_hasher: BuildHasherDefault::default(),
-            }
-        } else {
-            // todo: is this the best we can do - use simpler copy instead
-            let mut estimator = Self::new();
-            estimator.merge(self);
-            estimator
-        }
+        let mut estimator = Self::new();
+        estimator.merge(self);
+        estimator
     }
 }
 
 impl<const P: usize, const W: usize, H: Hasher + Default> Drop for CardinalityEstimator<P, W, H> {
     /// Free memory occupied by `CardinalityEstimator`
     fn drop(&mut self) {
-        if !self.is_small() {
-            if self.is_sparse() {
-                drop(unsafe { Box::from_raw(self.as_mut_sparse_slice()) });
-            } else {
-                drop(unsafe { Box::from_raw(self.as_mut_dense_slice()) });
+        match self.representation() {
+            Small => {}
+            Slice => {
+                drop(unsafe { Box::from_raw(self.as_slice_mut()) });
+            }
+            HashSet => {
+                drop(unsafe { Box::from_raw(self.as_hashset_mut()) });
+            }
+            HyperLogLog => {
+                drop(unsafe { Box::from_raw(self.as_hll_slice_mut()) });
             }
         }
     }

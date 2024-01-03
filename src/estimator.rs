@@ -714,41 +714,46 @@ pub mod tests {
         format!("estimator = {:?} avg_err = {:.4}", e, avg_relative_error)
     }
 
-    // cases with error = 0%
-    #[test_case(0, 0 => 0)]
-    #[test_case(0, 1 => 1)]
-    #[test_case(1, 0 => 1)]
-    #[test_case(1, 1 => 2)]
-    #[test_case(1, 2 => 3)]
-    #[test_case(2, 1 => 3)]
-    #[test_case(2, 2 => 4)]
-    #[test_case(2, 3 => 5)]
-    #[test_case(2, 4 => 6)]
-    #[test_case(4, 2 => 6)]
-    #[test_case(3, 2 => 5)]
-    #[test_case(3, 3 => 6)]
-    #[test_case(3, 4 => 7)]
-    #[test_case(4, 3 => 7)]
-    #[test_case(4, 4 => 8)]
-    #[test_case(4, 8 => 12)]
-    #[test_case(8, 4 => 12)]
-    #[test_case(4, 508 => 512)]
-    #[test_case(508, 4 => 512)]
-    #[test_case(511, 1 => 512)]
-    #[test_case(1, 511 => 512)]
-    #[test_case(512, 0 => 512)]
-    #[test_case(0, 512 => 512)]
-    // cases with error > 0%
-    #[test_case(512, 1 => 516)]
-    #[test_case(1, 512 => 495)]
-    #[test_case(512, 512 => 1011)]
-    #[test_case(513, 513 => 1010)]
-    #[test_case(10000, 0 => 9901)]
-    #[test_case(0, 10000 => 9894)]
-    #[test_case(4, 10000 => 9896)]
-    #[test_case(512, 10000 => 10366)]
-    #[test_case(10000, 10000 => 19889)]
-    fn test_merge(lhs_n: usize, rhs_n: usize) -> usize {
+    #[test_case(0, 0 => "{ representation: Small, estimate: 0, size: 8 }")]
+    #[test_case(0, 1 => "{ representation: Small, estimate: 1, size: 8 }")]
+    #[test_case(1, 0 => "{ representation: Small, estimate: 1, size: 8 }")]
+    #[test_case(1, 1 => "{ representation: Small, estimate: 2, size: 8 }")]
+    #[test_case(1, 2 => "{ representation: Slice, estimate: 3, size: 24 }")]
+    #[test_case(2, 1 => "{ representation: Slice, estimate: 3, size: 24 }")]
+    #[test_case(2, 2 => "{ representation: Slice, estimate: 4, size: 24 }")]
+    #[test_case(2, 3 => "{ representation: Slice, estimate: 5, size: 40 }")]
+    #[test_case(2, 4 => "{ representation: Slice, estimate: 6, size: 40 }")]
+    #[test_case(4, 2 => "{ representation: Slice, estimate: 6, size: 40 }")]
+    #[test_case(3, 2 => "{ representation: Slice, estimate: 5, size: 40 }")]
+    #[test_case(3, 3 => "{ representation: Slice, estimate: 6, size: 40 }")]
+    #[test_case(3, 4 => "{ representation: Slice, estimate: 7, size: 40 }")]
+    #[test_case(4, 3 => "{ representation: Slice, estimate: 7, size: 40 }")]
+    #[test_case(4, 4 => "{ representation: Slice, estimate: 8, size: 40 }")]
+    #[test_case(4, 8 => "{ representation: Slice, estimate: 12, size: 72 }")]
+    #[test_case(8, 4 => "{ representation: Slice, estimate: 12, size: 72 }")]
+    #[test_case(4, 12 => "{ representation: Slice, estimate: 16, size: 72 }")]
+    #[test_case(12, 4 => "{ representation: Slice, estimate: 16, size: 72 }")]
+    #[test_case(4, 13 => "{ representation: HashSet, estimate: 17, size: 184 }")]
+    #[test_case(13, 4 => "{ representation: HashSet, estimate: 17, size: 184 }")]
+    #[test_case(1, 16 => "{ representation: HashSet, estimate: 17, size: 184 }")]
+    #[test_case(16, 1 => "{ representation: HashSet, estimate: 17, size: 184 }")]
+    #[test_case(17, 28 => "{ representation: HashSet, estimate: 45, size: 344 }")]
+    #[test_case(28, 17 => "{ representation: HashSet, estimate: 45, size: 344 }")]
+    #[test_case(4, 444 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
+    #[test_case(444, 4 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
+    #[test_case(0, 448 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
+    #[test_case(448, 0 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
+    #[test_case(1, 448 => "{ representation: HyperLogLog, estimate: 437, size: 3092 }")]
+    #[test_case(448, 1 => "{ representation: HyperLogLog, estimate: 450, size: 3092 }")]
+    #[test_case(512, 512 => "{ representation: HyperLogLog, estimate: 1012, size: 3092 }")]
+    #[test_case(10000, 0 => "{ representation: HyperLogLog, estimate: 9908, size: 3092 }")]
+    #[test_case(0, 10000 => "{ representation: HyperLogLog, estimate: 9894, size: 3092 }")]
+    #[test_case(4, 10000 => "{ representation: HyperLogLog, estimate: 9896, size: 3092 }")]
+    #[test_case(10000, 4 => "{ representation: HyperLogLog, estimate: 9908, size: 3092 }")]
+    #[test_case(17, 10000 => "{ representation: HyperLogLog, estimate: 9913, size: 3092 }")]
+    #[test_case(10000, 17 => "{ representation: HyperLogLog, estimate: 9935, size: 3092 }")]
+    #[test_case(10000, 10000 => "{ representation: HyperLogLog, estimate: 19889, size: 3092 }")]
+    fn test_merge(lhs_n: usize, rhs_n: usize) -> String {
         let mut lhs = CardinalityEstimator::<12, 6>::new();
         let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 1];
         for i in 0..lhs_n {
@@ -764,7 +769,8 @@ pub mod tests {
         }
 
         lhs.merge(&rhs);
-        lhs.estimate()
+
+        format!("{:?}", lhs)
     }
 
     #[test]

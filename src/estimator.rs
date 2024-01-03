@@ -84,7 +84,7 @@
 
 use std::fmt::{Debug, Formatter};
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
-use std::mem::size_of;
+use std::mem::{size_of, size_of_val};
 use std::slice;
 
 use crate::beta::beta_horner;
@@ -113,7 +113,7 @@ pub struct CardinalityEstimator<
 
 /// Four representation types supported by `CardinalityEstimator`
 #[repr(u8)]
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Representation {
     Small = 0,
     Slice = 1,
@@ -490,13 +490,16 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
 
     /// Return memory size of `CardinalityEstimator`
     pub fn size_of(&self) -> usize {
-        if self.is_small() {
-            size_of::<Self>()
-        } else if self.is_sparse() {
-            size_of::<Self>() + size_of_val(self.as_sparse_slice())
-        } else {
-            size_of::<Self>() + size_of_val(self.as_dense_slice())
-        }
+        size_of::<Self>()
+            + match self.representation() {
+                Small => 0,
+                Slice => size_of_val(self.as_slice()),
+                HashSet => {
+                    let (_, layout) = self.as_hashset().raw_table().allocation_info();
+                    layout.size()
+                }
+                HyperLogLog => size_of_val(self.as_hll_slice()),
+            }
     }
 }
 

@@ -109,13 +109,24 @@ pub struct CardinalityEstimator<
     build_hasher: BuildHasherDefault<H>,
 }
 
+/// Four representation types supported by `CardinalityEstimator`
+#[repr(u8)]
+#[derive(Debug)]
+pub enum Representation {
+    Small = 0,
+    Slice = 1,
+    HashSet = 2,
+    HyperLogLog = 3,
+}
+
 impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P, W, H> {
     /// Ensure that `P` and `W` are in correct range at compile time
     const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
     /// Number of HyperLogLog registers
     const M: usize = 1 << P;
-    /// Dense representation slice length
-    const DENSE_LEN: usize = Self::M * W / 32 + 3;
+    /// HyperLogLog representation `u32` slice length based on #registers, stored zero registers, harmonic sum, and
+    /// one extra element for branchless register updates (see `set_register` for more details).
+    const HLL_SLICE_LEN: usize = Self::M * W / 32 + 3;
 
     /// Creates new instance of `CardinalityEstimator`
     #[inline]

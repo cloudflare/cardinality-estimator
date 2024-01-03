@@ -546,15 +546,28 @@ impl<const P: usize, const W: usize, H: Hasher + Default> PartialEq
 {
     /// Compare cardinality estimators
     fn eq(&self, rhs: &Self) -> bool {
-        if self.is_small() {
-            self.data == rhs.data
-        } else {
-            match (self.is_sparse(), rhs.is_sparse()) {
-                (true, true) => self.as_sparse_slice() == rhs.as_sparse_slice(),
-                (false, false) => self.as_dense_slice() == rhs.as_dense_slice(),
-                _ => false,
-            }
+        if self.representation() != rhs.representation() {
+            return false;
         }
+
+        match self.representation() {
+            Small => self.data == rhs.data,
+            Slice => self.as_slice() == rhs.as_slice(),
+            HashSet => self.as_hashset() == rhs.as_hashset(),
+            HyperLogLog => self.as_hll_slice() == rhs.as_hll_slice(),
+        }
+    }
+}
+
+impl<const P: usize, const W: usize, H: Hasher + Default> Debug for CardinalityEstimator<P, W, H> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{ representation: {:?}, estimate: {}, size: {} }}",
+            self.representation(),
+            self.estimate(),
+            self.size_of()
+        )
     }
 }
 

@@ -11,11 +11,12 @@
 //!
 //! For parameters P = 12, W = 6:
 //! - Cardinality in [0..2] range - 8 bytes (small representation)
-//! - Cardinality in [3..4] range - 28 bytes (sparse representation)
-//! - Cardinality in [5..8] range - 44 bytes (sparse representation)
-//! - Cardinality in [9..16] range - 76 bytes (sparse representation)
+//! - Cardinality in [3..4] range - 24 bytes (slice representation)
+//! - Cardinality in [5..8] range - 40 bytes (slice representation)
+//! - Cardinality in [9..16] range - 72 bytes (slice representation)
+//! - Cardinality in [17..28] range - 184 bytes (hashset representation)
 //! - ...
-//! - Cardinality in [512..] range - 3092 bytes (dense representation)
+//! - Cardinality in [449..] range - 3092 bytes (hyperloglog representation)
 //!
 //! ## Low latency
 //! - Auto-vectorization for slice operations via compiler hints
@@ -26,7 +27,7 @@
 //! - Efficient polynomial computation using Horner's method.
 //!
 //! ## High accuracy
-//! - For small cardinality range (<= 512 for P = 12, W = 6)
+//! - For small cardinality range (<= 448 for P = 12, W = 6)
 //!   cardinality counted very accurately (within hash collisions chance)
 //! - For large cardinality range HyperLogLog++ is used with LogLog-Beta bias correction.
 //!   - Expected error:
@@ -36,71 +37,67 @@
 //!     P = 18, W = 6: 1.04 / sqrt(2^18) = 0.02%
 //!
 //! # Data storage format
-//! Cardinality estimator stores data in one of the three representations:
+//! Cardinality estimator stores data in one of the four representations:
 //!
 //! ## Small representation
 //! Allows to estimate cardinality in [0..2] range and uses only 8 bytes of memory.
 //!
 //! The `data` format of small representation:
-//! - 0..31 bits    - store 32-bit encoded hash of the value.
-//! - 32..62 bits   - store 32-bit encoded hash using 31 bits (only if its lowest bit set to 0).
-//! - 63 bit        - bit set to 1 indicates whether small representation is used (see `SMALL_MASK`).
+//! - 0..1 bits     - store representation type (bits are set to `00`)
+//! - 2..33 bits    - store 31-bit encoded hash
+//! - 34..63 bits   - store 31-bit encoded hash
 //!
-//! ## Sparse representation
-//! Allows to estimate medium cardinality in [3..N] range, where `N` is based on `P` and `W`.
+//! ## Slice representation
+//! Allows to estimate small cardinality in [3..16] range.
 //!
 //! The `data` format of sparse representation:
-//! - 0..58 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
-//! - 59..62 bits   - store 4-bit slice capacity encoded as power of 2, e.g. 1 for 4, 2 for 8, etc.
-//! - 63 bit        - bit set to 0 indicates whether sparse or dense representation is used.
+//! - 0..1 bits     - store representation type (bits are set to `01`)
+//! - 2..55 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
+//! - 56..63 bits   - store actual slice length
 //!
 //! Slice encoding:
-//! - data[0]       - stores actual number of hashes `N`
-//! - data[1..N+1]  - store N `u32` encoded hashes
-//! - data[N+1..]   - store zeros used for future hashes
+//! - data[0..N]    - store N `u32` encoded hashes
+//! - data[N..]     - store zeros used for future hashes
 //!
-//! ## Dense representation
+//! ## HashSet representation
+//! Allows to estimate small cardinality in [16..N] range, where `N` based on `P` and `W` parameters.
+//!
+//! The `data` format of sparse representation:
+//! - 0..1 bits     - store representation type (bits are set to `10`)
+//! - 2..63 bits    - store pointer to `Box<HashSet<u32>>` (on `x86_64 systems only 48-bits are needed).
+//!
+//! ## HyperLogLog representation
 //! Allows to estimate large cardinality in `[N..]` range, where `N` is based on `P` and `W`.
-//! Dense representation uses modified HyperLogLog++ with `M` registers of `W` width.
+//! This representation uses modified HyperLogLog++ with `M` registers of `W` width.
 //!
 //! Original HyperLogLog++ paper:
 //! https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/40671.pdf
 //!
 //! The `data` format of sparse representation:
-//! - 0..58 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
-//! - 59..62 bits   - store 4-bit 0 value indicating that dense representation is used.
-//! - 63 bit        - bit set to 0 indicates whether sparse or dense representation is used.
+//! - 0..1 bits     - store representation type (bits are set to `11`)
+//! - 2..63 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
 //!
 //! Slice encoding:
 //! - data[0]       - stores number of HyperLogLog registers set to 0.
 //! - data[1]       - stores harmonic sum of HyperLogLog registers (`f32` transmuted into `u32`).
 //! - data[2..]     - stores register ranks using `W` bits per each register.
 
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
-use std::mem::{size_of, size_of_val};
+use std::mem::size_of;
 use std::slice;
 
 use crate::beta::beta_horner;
+use Representation::*;
 
+use hashbrown::HashSet;
 use wyhash::WyHash;
 
-/// Mask used to check whether cardinality estimator uses small representation
-const SMALL_MASK: usize = 0x8000_0000_0000_0000;
-/// Mask used to store 1-st encoded hash in small representation
-const SMALL_1_MASK: usize = 0x0000_0000_ffff_ffff;
-/// Mask used to store 2-nd encoded hash in small representation
-const SMALL_2_MASK: usize = 0x7fff_ffff_0000_0000;
-/// Mask used to obtain slice pointer for sparse and dense representations
-const SLICE_PTR_MASK: usize = 0x07ff_ffff_ffff_ffff;
-/// Mask used to obtain slice length for sparse representation
-const SLICE_LEN_MASK: usize = 0x7800_0000_0000_0000;
-/// Offset used to store slice length for sparse representation
-const SLICE_LEN_OFFSET: usize = 59;
+/// Maximum number of elements stored in slice representation
+const MAX_SLICE_CAPACITY: usize = 16;
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
-#[derive(Debug)]
 pub struct CardinalityEstimator<
     const P: usize = 12,
     const W: usize = 6,

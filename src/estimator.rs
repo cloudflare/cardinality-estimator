@@ -50,7 +50,7 @@
 //! ## Slice representation
 //! Allows to estimate small cardinality in [3..16] range.
 //!
-//! The `data` format of sparse representation:
+//! The `data` format of slice representation:
 //! - 0..1 bits     - store representation type (bits are set to `01`)
 //! - 2..55 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
 //! - 56..63 bits   - store actual slice length
@@ -62,7 +62,7 @@
 //! ## HashSet representation
 //! Allows to estimate small cardinality in [16..N] range, where `N` based on `P` and `W` parameters.
 //!
-//! The `data` format of sparse representation:
+//! The `data` format of hashset representation:
 //! - 0..1 bits     - store representation type (bits are set to `10`)
 //! - 2..63 bits    - store pointer to `Box<HashSet<u32>>` (on `x86_64 systems only 48-bits are needed).
 //!
@@ -73,7 +73,7 @@
 //! Original HyperLogLog++ paper:
 //! https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/40671.pdf
 //!
-//! The `data` format of sparse representation:
+//! The `data` format of HyperLogLog representation:
 //! - 0..1 bits     - store representation type (bits are set to `11`)
 //! - 2..63 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
 //!
@@ -286,7 +286,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     }
 
     /// Insert encoded hash into small representation
-    /// with potential upgrade to sparse representation
+    /// with potential upgrade to slice representation
     #[inline]
     fn insert_into_small(&mut self, h: u32) {
         // Retrieve 1-st encoded hash
@@ -301,87 +301,102 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         // Retrieve 2-nd encoded hash
         let h2 = self.small_h2();
         if h2 == 0 {
-            self.data |= (h as usize) << 32;
+            self.data |= (h as usize) << 33;
             return;
         }
         if h2 == h {
             return;
         }
 
-        // both hashes occupied -> upgrade to sparse representation
-        self.replace_data(vec![3, h1, h2, h, 0]);
+        // both hashes occupied -> upgrade to slice representation
+        self.set_slice_data(vec![h1, h2, h, 0], 3);
     }
 
-    /// Insert encoded hash into sparse representation
+    /// Insert encoded hash into slice representation
     #[inline]
-    fn insert_into_sparse(&mut self, h: u32) {
-        let data = self.as_mut_sparse_slice();
+    fn insert_into_slice(&mut self, h: u32) {
+        let len = self.slice_len();
+        let data = self.as_slice_mut();
+        let cap = data.len();
 
-        let len = data[0] as usize;
-        let found = if data.len() == 5 {
-            contains_fixed_vectorized::<4>(data[1..5].try_into().unwrap(), h)
+        let found = if cap == 4 {
+            contains_vectorized::<4>(&data, h)
         } else {
             // calculate rounded up slice length for efficient look up in batches
-            let clen = 8 * len.div_ceil(8);
-            contains_vectorized::<8>(&data[1..clen + 1], h)
+            let rlen = 8 * len.div_ceil(8);
+            contains_vectorized::<8>(&data[..rlen], h)
         };
 
         if found {
             return;
         }
 
-        if len < data.len() - 1 {
-            data[len + 1] = h;
-            data[0] += 1;
+        if len < cap {
+            // if there are available slots in current slice - append to it
+            *unsafe { data.get_unchecked_mut(len) } = h;
+            self.data = ((len + 1) << 56) | (PTR_MASK & data.as_ptr() as usize) | (Slice as usize);
             return;
         }
 
-        let new_data = Self::grow_data(&data[1..]);
-        self.replace_data(new_data);
-        self.insert_encoded_hash(h);
-    }
+        if cap < MAX_SLICE_CAPACITY {
+            let mut new_data = vec![0; cap * 2];
+            new_data[..len].copy_from_slice(data);
+            new_data[len] = h;
+            drop(unsafe { Box::from_raw(data) });
+            self.set_slice_data(new_data, len + 1);
+        } else {
+            let mut set = Box::new(HashSet::with_capacity(cap + 1));
+            for h in data {
+                set.insert(*h);
+            }
+            set.insert(h);
 
-    /// Grow data by either doubling sparse representation or switching to dense representation
-    #[inline]
-    fn grow_data(old_data: &[u32]) -> Vec<u32> {
-        let old_len = old_data.len();
-        let new_len = old_len * 2 + 1;
-        if new_len >= Self::DENSE_LEN {
-            return Self::sparse_to_dense(old_data);
+            let ptr = Box::into_raw(set);
+            self.data = (ptr as usize) | (HashSet as usize);
         }
-
-        let mut new_data = vec![0u32; new_len];
-        new_data[0] = old_len as u32;
-        new_data[1..old_len + 1].copy_from_slice(old_data);
-
-        new_data
     }
 
-    /// Replace any representation with new data while dropping old data
+    /// Insert encoded hash into hashset representation
     #[inline]
-    pub(crate) fn replace_data(&mut self, data: Vec<u32>) {
-        if !self.is_small() {
-            if self.is_sparse() {
-                drop(unsafe { Box::from_raw(self.as_mut_sparse_slice()) });
-            } else {
-                drop(unsafe { Box::from_raw(self.as_mut_dense_slice()) });
+    fn insert_into_set(&mut self, h: u32) {
+        let set = self.as_hashset_mut();
+
+        if set.capacity() == set.len() {
+            let (_, layout) = set.raw_table().allocation_info();
+            // if doubling hashset capacity exceeds HyperLogLog representation size - migrate to it
+            if 2 * layout.size() > Self::HLL_SLICE_LEN * size_of::<u32>() {
+                let mut data = vec![0; Self::HLL_SLICE_LEN];
+                data[0] = Self::M as u32;
+                data[1] = (Self::M as f32).to_bits();
+
+                for &h in set.iter() {
+                    let (idx, new_rank) = Self::decode_hash(h);
+                    Self::insert_into_hll(&mut data, idx, new_rank);
+                }
+
+                drop(unsafe { Box::from_raw(set) });
+                self.set_hll_data(data);
+                self.insert_encoded_hash(h);
+
+                return;
             }
         }
-        self.data = (SLICE_PTR_MASK & (data.as_ptr() as usize)) | self.encoded_slice_len(&data);
+
+        set.insert(h);
+    }
+
+    /// Set slice representation with new data
+    #[inline]
+    pub(crate) fn set_slice_data(&mut self, data: Vec<u32>, len: usize) {
+        self.data = (len << 56) | (PTR_MASK & data.as_ptr() as usize) | (Slice as usize);
         std::mem::forget(data);
     }
 
-    /// Convert sparse representation into dense representation
+    /// Set HyperLogLog representation with new data
     #[inline]
-    fn sparse_to_dense(sparse_data: &[u32]) -> Vec<u32> {
-        let mut data = vec![0u32; Self::DENSE_LEN];
-        data[0] = Self::M as u32;
-        data[1] = (Self::M as f32).to_bits();
-        sparse_data[1..].iter().for_each(|h| {
-            let (idx, new_rank) = Self::decode_hash(*h);
-            Self::insert_into_dense(data.as_mut_slice(), idx, new_rank);
-        });
-        data
+    fn set_hll_data(&mut self, data: Vec<u32>) {
+        self.data = (PTR_MASK & (data.as_ptr() as usize)) | (HyperLogLog as usize);
+        std::mem::forget(data);
     }
 
     /// Compute the sparse encoding of the given hash

@@ -16,7 +16,9 @@
 //! Refer to the serde documentation for more details on custom serialization and deserialization:
 //! - [Serialization](https://serde.rs/impl-serialize.html)
 //! - [Deserialization](https://serde.rs/impl-deserialize.html)
-use crate::estimator::CardinalityEstimator;
+use crate::array::Array;
+use crate::estimator::{CardinalityEstimator, Representation};
+use crate::hyperloglog::HyperLogLog;
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Serialize};
 
@@ -30,14 +32,21 @@ impl<const P: usize, const W: usize> Serialize for CardinalityEstimator<P, W> {
 
         // The first element is the data field of the estimator.
         tup.serialize_element(&self.data)?;
-        if self.is_small() {
-            // If the estimator is small, the second element is a None value. This indicates that
-            // the estimator is using the small data optimization and has no separate array data.
-            tup.serialize_element(&None::<Vec<u32>>)?;
-        } else {
-            // If the estimator is not small, the second element is a option containing array data.
-            let data = self.as_slice();
-            tup.serialize_element(&Some(data))?;
+        match self.representation() {
+            Representation::Small => {
+                // If the estimator is small, the second element is a None value. This indicates that
+                // the estimator is using the small data optimization and has no separate slice data.
+                tup.serialize_element(&None::<Vec<u32>>)?;
+            }
+            Representation::Slice => {
+                // If the estimator is slice, the second element is a option containing slice data.
+                tup.serialize_element(&Some(Array::from(self.data).items()))?;
+            }
+            Representation::HLL => {
+                // If the estimator is HLL, the second element is a option containing HLL data.
+                let data = HyperLogLog::<P, W>::from(self.data).data;
+                tup.serialize_element(&Some(data))?;
+            }
         }
 
         // Finalize the tuple.
@@ -58,12 +67,19 @@ impl<'de, const P: usize, const W: usize> Deserialize<'de> for CardinalityEstima
         // Initialize a new estimator.
         let mut estimator = CardinalityEstimator::<P, W>::new();
 
-        match opt_vec {
-            // estimator is not small and we need to replace its data with the deserialized array.
-            Some(vec) => estimator.replace_data(vec),
-            // estimator is small and we can just set its data field to the deserialized value.
-            None => estimator.data = data,
-        }
+        estimator.data = match opt_vec {
+            // estimator is not small, and we need to replace its data with the deserialized array.
+            Some(vec) => {
+                if vec.len() == HyperLogLog::<P, W>::HLL_SLICE_LEN {
+                    HyperLogLog::<P, W>::from(vec).into()
+                } else {
+                    let slice_len = vec.len();
+                    Array::from_vec(vec, slice_len).into()
+                }
+            }
+            // estimator is small, and we can just set its data field to the deserialized value.
+            None => data,
+        };
 
         Ok(estimator)
     }
@@ -72,7 +88,6 @@ impl<'de, const P: usize, const W: usize> Deserialize<'de> for CardinalityEstima
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use seahash::SeaHasher;
     use test_case::test_case;
 
     #[test_case(0; "empty set")]
@@ -85,7 +100,7 @@ pub mod tests {
 
         for i in 0..n {
             let item = format!("item{}", i);
-            original_estimator.insert::<_, SeaHasher>(&item);
+            original_estimator.insert(&item);
         }
 
         let serialized = serde_json::to_string(&original_estimator).expect("serialization failed");

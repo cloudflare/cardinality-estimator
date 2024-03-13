@@ -21,7 +21,7 @@ const PTR_MASK: usize = !3;
 
 #[derive(Debug)]
 pub(crate) struct HyperLogLog<'a, const P: usize = 12, const W: usize = 6> {
-    data: &'a mut [u32],
+    pub(crate) data: &'a mut [u32],
 }
 
 impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
@@ -29,12 +29,12 @@ impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
     const M: usize = 1 << P;
     /// HyperLogLog representation `u32` slice length based on #registers, stored zero registers, harmonic sum, and
     /// one extra element for branchless register updates (see `set_register` for more details).
-    const HLL_SLICE_LEN: usize = Self::M * W / 32 + 3;
+    pub(crate) const HLL_SLICE_LEN: usize = Self::M * W / 32 + 3;
 
     /// Create new instance of `HyperLogLog` representation from items
     #[inline]
     pub(crate) fn new(items: &[u32]) -> Self {
-        let mut hll_data = vec![0; Self::HLL_SLICE_LEN];
+        let mut hll_data = vec![0u32; Self::HLL_SLICE_LEN];
         let data = (PTR_MASK & hll_data.as_mut_ptr() as usize) | 3;
         std::mem::forget(hll_data);
         let mut hll = Self::from(data);
@@ -172,6 +172,16 @@ impl<const P: usize, const W: usize> From<usize> for HyperLogLog<'_, P, W> {
         // SAFETY: caller of this method must ensure that `data` contains valid slice pointer.
         let data = unsafe { slice::from_raw_parts_mut(ptr, Self::HLL_SLICE_LEN) };
         Self { data }
+    }
+}
+
+impl<'a, const P: usize, const W: usize> From<Vec<u32>> for HyperLogLog<'a, P, W> {
+    /// Create new instance of `HyperLogLog` from given `hll_data`
+    #[inline]
+    fn from(mut hll_data: Vec<u32>) -> Self {
+        let data = (PTR_MASK & hll_data.as_mut_ptr() as usize) | 3;
+        std::mem::forget(hll_data);
+        Self::from(data)
     }
 }
 

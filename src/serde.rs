@@ -16,11 +16,14 @@
 //! Refer to the serde documentation for more details on custom serialization and deserialization:
 //! - [Serialization](https://serde.rs/impl-serialize.html)
 //! - [Deserialization](https://serde.rs/impl-deserialize.html)
+use std::ops::Deref;
+
+use serde::ser::SerializeTuple;
+use serde::{Deserialize, Serialize};
+
 use crate::array::Array;
 use crate::estimator::{CardinalityEstimator, Representation};
 use crate::hyperloglog::HyperLogLog;
-use serde::ser::SerializeTuple;
-use serde::{Deserialize, Serialize};
 
 impl<const P: usize, const W: usize> Serialize for CardinalityEstimator<P, W> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -38,9 +41,9 @@ impl<const P: usize, const W: usize> Serialize for CardinalityEstimator<P, W> {
                 // the estimator is using the small data optimization and has no separate slice data.
                 tup.serialize_element(&None::<Vec<u32>>)?;
             }
-            Representation::Slice => {
+            Representation::Array => {
                 // If the estimator is slice, the second element is a option containing slice data.
-                tup.serialize_element(&Some(Array::from(self.data).items()))?;
+                tup.serialize_element(&Some(Array::from(self.data).deref()))?;
             }
             Representation::HLL => {
                 // If the estimator is HLL, the second element is a option containing HLL data.

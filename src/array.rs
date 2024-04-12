@@ -11,6 +11,7 @@
 //! - data[N..]     - store zeros used for future hashes
 
 use std::mem::{size_of, size_of_val};
+use std::ops::Deref;
 use std::slice;
 
 /// Maximum number of elements stored in array representation
@@ -21,7 +22,7 @@ const LEN_OFFSET: usize = 56;
 const PTR_MASK: usize = ((1 << LEN_OFFSET) - 1) & !3;
 
 /// Array representation container
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct Array<'a> {
     /// Number of items stored in the array
     len: usize,
@@ -77,12 +78,6 @@ impl<'a> Array<'a> {
         false
     }
 
-    /// Return items stored within `Array` representation
-    #[inline]
-    pub(crate) fn items(&self) -> &[u32] {
-        &self.arr[..self.len]
-    }
-
     /// Return memory size of `Array` representation
     #[inline]
     pub(crate) fn size_of(&self) -> usize {
@@ -126,6 +121,14 @@ impl From<Array<'_>> for usize {
     #[inline]
     fn from(v: Array) -> Self {
         (v.len << LEN_OFFSET) | (PTR_MASK & v.arr.as_ptr() as usize) | 1
+    }
+}
+
+impl<'a> Deref for Array<'a> {
+    type Target = [u32];
+
+    fn deref(&self) -> &Self::Target {
+        &self.arr[..self.len]
     }
 }
 

@@ -1,0 +1,20 @@
+[package]
+name = "cardinality-estimator-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+cardinality-estimator = { path = ".." }
+libfuzzer-sys = "0.4"
+wyhash = "0.5.0"
+
+[[bin]]
+name = "fuzz_target_estimator"
+path = "fuzz_targets/fuzz_target_estimator.rs"
+test = false
+doc = false
+bench = false

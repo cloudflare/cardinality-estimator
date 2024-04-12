@@ -691,10 +691,10 @@ pub mod tests {
     #[test_case(129 => "estimator = { representation: HLL, estimate: 130, size: 3092 } avg_err = 0.0001")]
     #[test_case(256 => "estimator = { representation: HLL, estimate: 254, size: 3092 } avg_err = 0.0029")]
     #[test_case(512 => "estimator = { representation: HLL, estimate: 498, size: 3092 } avg_err = 0.0068")]
-   #[test_case(1024 => "estimator = { representation: HLL, estimate: 1012, size: 3092 } avg_err = 0.0130")]
-   #[test_case(4096 => "estimator = { representation: HLL, estimate: 4105, size: 3092 } avg_err = 0.0089")]
-   #[test_case(10_000 => "estimator = { representation: HLL, estimate: 10068, size: 3092 } avg_err = 0.0087")]
-   #[test_case(100_000 => "estimator = { representation: HLL, estimate: 95628, size: 3092 } avg_err = 0.0182")]
+    #[test_case(1024 => "estimator = { representation: HLL, estimate: 1012, size: 3092 } avg_err = 0.0130")]
+    #[test_case(4096 => "estimator = { representation: HLL, estimate: 4105, size: 3092 } avg_err = 0.0089")]
+    #[test_case(10_000 => "estimator = { representation: HLL, estimate: 10068, size: 3092 } avg_err = 0.0087")]
+    #[test_case(100_000 => "estimator = { representation: HLL, estimate: 95628, size: 3092 } avg_err = 0.0182")]
     fn test_estimator_p12_w6(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<12, 6>::new(), n)
     }
@@ -754,54 +754,43 @@ pub mod tests {
     #[test_case(0, 1 => "{ representation: Small, estimate: 1, size: 8 }")]
     #[test_case(1, 0 => "{ representation: Small, estimate: 1, size: 8 }")]
     #[test_case(1, 1 => "{ representation: Small, estimate: 2, size: 8 }")]
-    #[test_case(1, 2 => "{ representation: Slice, estimate: 3, size: 24 }")]
-    #[test_case(2, 1 => "{ representation: Slice, estimate: 3, size: 24 }")]
-    #[test_case(2, 2 => "{ representation: Slice, estimate: 4, size: 24 }")]
-    #[test_case(2, 3 => "{ representation: Slice, estimate: 5, size: 40 }")]
-    #[test_case(2, 4 => "{ representation: Slice, estimate: 6, size: 40 }")]
-    #[test_case(4, 2 => "{ representation: Slice, estimate: 6, size: 40 }")]
-    #[test_case(3, 2 => "{ representation: Slice, estimate: 5, size: 40 }")]
-    #[test_case(3, 3 => "{ representation: Slice, estimate: 6, size: 40 }")]
-    #[test_case(3, 4 => "{ representation: Slice, estimate: 7, size: 40 }")]
-    #[test_case(4, 3 => "{ representation: Slice, estimate: 7, size: 40 }")]
-    #[test_case(4, 4 => "{ representation: Slice, estimate: 8, size: 40 }")]
-    #[test_case(4, 8 => "{ representation: Slice, estimate: 12, size: 72 }")]
-    #[test_case(8, 4 => "{ representation: Slice, estimate: 12, size: 72 }")]
-    #[test_case(4, 12 => "{ representation: Slice, estimate: 16, size: 72 }")]
-    #[test_case(12, 4 => "{ representation: Slice, estimate: 16, size: 72 }")]
-    #[test_case(4, 13 => "{ representation: HashSet, estimate: 17, size: 184 }")]
-    #[test_case(13, 4 => "{ representation: HashSet, estimate: 17, size: 184 }")]
-    #[test_case(1, 16 => "{ representation: HashSet, estimate: 17, size: 184 }")]
-    #[test_case(16, 1 => "{ representation: HashSet, estimate: 17, size: 184 }")]
-    #[test_case(17, 28 => "{ representation: HashSet, estimate: 45, size: 344 }")]
-    #[test_case(28, 17 => "{ representation: HashSet, estimate: 45, size: 344 }")]
-    #[test_case(4, 444 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
-    #[test_case(444, 4 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
-    #[test_case(0, 448 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
-    #[test_case(448, 0 => "{ representation: HashSet, estimate: 448, size: 2584 }")]
-    #[test_case(1, 448 => "{ representation: HyperLogLog, estimate: 437, size: 3092 }")]
-    #[test_case(448, 1 => "{ representation: HyperLogLog, estimate: 450, size: 3092 }")]
-    #[test_case(512, 512 => "{ representation: HyperLogLog, estimate: 1012, size: 3092 }")]
-    #[test_case(10000, 0 => "{ representation: HyperLogLog, estimate: 9908, size: 3092 }")]
-    #[test_case(0, 10000 => "{ representation: HyperLogLog, estimate: 9894, size: 3092 }")]
-    #[test_case(4, 10000 => "{ representation: HyperLogLog, estimate: 9896, size: 3092 }")]
-    #[test_case(10000, 4 => "{ representation: HyperLogLog, estimate: 9908, size: 3092 }")]
-    #[test_case(17, 10000 => "{ representation: HyperLogLog, estimate: 9913, size: 3092 }")]
-    #[test_case(10000, 17 => "{ representation: HyperLogLog, estimate: 9935, size: 3092 }")]
-    #[test_case(10000, 10000 => "{ representation: HyperLogLog, estimate: 19889, size: 3092 }")]
+    #[test_case(1, 2 => "{ representation: Array, estimate: 3, size: 24 }")]
+    #[test_case(2, 1 => "{ representation: Array, estimate: 3, size: 24 }")]
+    #[test_case(2, 2 => "{ representation: Array, estimate: 4, size: 24 }")]
+    #[test_case(2, 3 => "{ representation: Array, estimate: 5, size: 40 }")]
+    #[test_case(2, 4 => "{ representation: Array, estimate: 6, size: 40 }")]
+    #[test_case(4, 2 => "{ representation: Array, estimate: 6, size: 40 }")]
+    #[test_case(3, 2 => "{ representation: Array, estimate: 5, size: 40 }")]
+    #[test_case(3, 3 => "{ representation: Array, estimate: 6, size: 40 }")]
+    #[test_case(3, 4 => "{ representation: Array, estimate: 7, size: 40 }")]
+    #[test_case(4, 3 => "{ representation: Array, estimate: 7, size: 40 }")]
+    #[test_case(4, 4 => "{ representation: Array, estimate: 8, size: 40 }")]
+    #[test_case(4, 8 => "{ representation: Array, estimate: 12, size: 72 }")]
+    #[test_case(8, 4 => "{ representation: Array, estimate: 12, size: 72 }")]
+    #[test_case(4, 12 => "{ representation: Array, estimate: 16, size: 72 }")]
+    #[test_case(12, 4 => "{ representation: Array, estimate: 16, size: 72 }")]
+    #[test_case(1, 127 => "{ representation: Array, estimate: 128, size: 520 }")]
+    #[test_case(1, 128 => "{ representation: HLL, estimate: 126, size: 3092 }")]
+    #[test_case(127, 1 => "{ representation: Array, estimate: 128, size: 520 }")]
+    #[test_case(128, 1 => "{ representation: HLL, estimate: 130, size: 3092 }")]
+    #[test_case(128, 128 => "{ representation: HLL, estimate: 256, size: 3092 }")]
+    #[test_case(512, 512 => "{ representation: HLL, estimate: 991, size: 3092 }")]
+    #[test_case(10000, 0 => "{ representation: HLL, estimate: 10068, size: 3092 }")]
+    #[test_case(0, 10000 => "{ representation: HLL, estimate: 10035, size: 3092 }")]
+    #[test_case(4, 10000 => "{ representation: HLL, estimate: 10045, size: 3092 }")]
+    #[test_case(10000, 4 => "{ representation: HLL, estimate: 10070, size: 3092 }")]
+    #[test_case(17, 10000 => "{ representation: HLL, estimate: 10052, size: 3092 }")]
+    #[test_case(10000, 17 => "{ representation: HLL, estimate: 10084, size: 3092 }")]
+    #[test_case(10000, 10000 => "{ representation: HLL, estimate: 19743, size: 3092 }")]
     fn test_merge(lhs_n: usize, rhs_n: usize) -> String {
         let mut lhs = CardinalityEstimator::<12, 6>::new();
-        let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 1];
         for i in 0..lhs_n {
-            buf[..8].copy_from_slice(&i.to_le_bytes());
-            lhs.insert(&buf);
+            lhs.insert(&i);
         }
 
         let mut rhs = CardinalityEstimator::<12, 6>::new();
-        let mut buf = [0, 0, 0, 0, 0, 0, 0, 0, 2];
-        for i in 0..rhs_n {
-            buf[..8].copy_from_slice(&i.to_le_bytes());
-            rhs.insert(&buf);
+        for i in -(rhs_n as isize)..0 {
+            rhs.insert(&i);
         }
 
         lhs.merge(&rhs);

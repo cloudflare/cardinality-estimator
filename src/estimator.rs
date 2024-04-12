@@ -11,10 +11,9 @@
 //!
 //! For parameters P = 12, W = 6:
 //! - Cardinality in [0..2] range - 8 bytes (small representation)
-//! - Cardinality in [3..4] range - 24 bytes (slice representation)
-//! - Cardinality in [5..8] range - 40 bytes (slice representation)
-//! - Cardinality in [9..16] range - 72 bytes (slice representation)
-//! - Cardinality in [17..28] range - 184 bytes (hashset representation)
+//! - Cardinality in [3..4] range - 24 bytes (array representation)
+//! - Cardinality in [5..8] range - 40 bytes (array representation)
+//! - Cardinality in [9..16] range - 72 bytes (array representation)
 //! - ...
 //! - Cardinality in [449..] range - 3092 bytes (hyperloglog representation)
 //!
@@ -30,77 +29,33 @@
 //! - For small cardinality range (<= 448 for P = 12, W = 6)
 //!   cardinality counted very accurately (within hash collisions chance)
 //! - For large cardinality range HyperLogLog++ is used with LogLog-Beta bias correction.
-//!   - Expected error:
-//!     P = 10, W = 5: 1.04 / sqrt(2^10) = 3.25%
-//!     P = 12, W = 6: 1.04 / sqrt(2^12) = 1.62%
-//!     P = 14, W = 6: 1.04 / sqrt(2^14) = 0.81%
-//!     P = 18, W = 6: 1.04 / sqrt(2^18) = 0.02%
+//!   - Expected error (1.04 / sqrt(2^P)):
+//!     - P = 10, W = 5: 3.25%
+//!     - P = 12, W = 6: 1.62%
+//!     - P = 14, W = 6: 0.81%
+//!     - P = 18, W = 6: 0.02%
 //!
 //! # Data storage format
-//! Cardinality estimator stores data in one of the four representations:
+//! Cardinality estimator stores data in one of the three representations:
+//! - `Small` representation - see `small` module for more details.
+//! - `Array` representation - see `array` module for more details.
+//! - `HyperLogLog` representation - see `hyperloglog` module for more details
 //!
-//! ## Small representation
-//! Allows to estimate cardinality in [0..2] range and uses only 8 bytes of memory.
-//!
-//! The `data` format of small representation:
-//! - 0..1 bits     - store representation type (bits are set to `00`)
-//! - 2..33 bits    - store 31-bit encoded hash
-//! - 34..63 bits   - store 31-bit encoded hash
-//!
-//! ## Slice representation
-//! Allows to estimate small cardinality in [3..16] range.
-//!
-//! The `data` format of slice representation:
-//! - 0..1 bits     - store representation type (bits are set to `01`)
-//! - 2..55 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
-//! - 56..63 bits   - store actual slice length
-//!
-//! Slice encoding:
-//! - data[0..N]    - store N `u32` encoded hashes
-//! - data[N..]     - store zeros used for future hashes
-//!
-//! ## HashSet representation
-//! Allows to estimate small cardinality in [16..N] range, where `N` based on `P` and `W` parameters.
-//!
-//! The `data` format of hashset representation:
-//! - 0..1 bits     - store representation type (bits are set to `10`)
-//! - 2..63 bits    - store pointer to `Box<HashSet<u32>>` (on `x86_64 systems only 48-bits are needed).
-//!
-//! ## HyperLogLog representation
-//! Allows to estimate large cardinality in `[N..]` range, where `N` is based on `P` and `W`.
-//! This representation uses modified HyperLogLog++ with `M` registers of `W` width.
-//!
-//! Original HyperLogLog++ paper:
-//! https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/40671.pdf
-//!
-//! The `data` format of HyperLogLog representation:
-//! - 0..1 bits     - store representation type (bits are set to `11`)
-//! - 2..63 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
-//!
-//! Slice encoding:
-//! - data[0]       - stores number of HyperLogLog registers set to 0.
-//! - data[1]       - stores harmonic sum of HyperLogLog registers (`f32` transmuted into `u32`).
-//! - data[2..]     - stores register ranks using `W` bits per each register.
-
+//! # Data Storage Format
+//! The cardinality estimator stores data in one of three formats: `Small`, `Array`, and `HyperLogLog`.
+//! See corresponding modules (`small`, `array`, `hyperloglog`) for more details.
 use std::fmt::{Debug, Formatter};
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
-use std::mem::{size_of, size_of_val};
-use std::slice;
+use std::ops::Deref;
 
-use crate::beta::beta_horner;
-use Representation::*;
-
-use hashbrown::HashSet;
 use wyhash::WyHash;
 
-/// Maximum number of elements stored in slice representation
-const MAX_SLICE_CAPACITY: usize = 16;
+use crate::array::Array;
+use crate::hyperloglog::HyperLogLog;
+use crate::small::Small;
+
 /// Mask used for storing and retrieving representation type stored in lowest 2 bits of `data` field.
 const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
-/// Mask used for accessing heap allocated data stored at the pointer in `data` field.
-const PTR_MASK: usize = 0x00ff_ffff_ffff_fffc;
-/// Mask used for extracting hashes stored in small representation (31 bits)
-const SMALL_MASK: usize = 0x0000_0000_7fff_ffff;
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]

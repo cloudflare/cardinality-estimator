@@ -87,7 +87,8 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     #[inline]
     pub fn new() -> Self {
         // compile time check of params
-        _ = Self::VALID_PARAMS;
+        #[allow(clippy::let_unit_value)]
+        let _ = Self::VALID_PARAMS;
 
         Self {
             // Start with empty small representation

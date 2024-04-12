@@ -15,7 +15,8 @@
 //! - Cardinality in [5..8] range - 40 bytes (array representation)
 //! - Cardinality in [9..16] range - 72 bytes (array representation)
 //! - ...
-//! - Cardinality in [449..] range - 3092 bytes (hyperloglog representation)
+//! - Cardinality in [65..128] range - 520 bytes (array representation)
+//! - Cardinality in [129..] range - 3092 bytes (hyperloglog representation)
 //!
 //! ## Low latency
 //! - Auto-vectorization for slice operations via compiler hints
@@ -26,7 +27,7 @@
 //! - Efficient polynomial computation using Horner's method.
 //!
 //! ## High accuracy
-//! - For small cardinality range (<= 448 for P = 12, W = 6)
+//! - For small cardinality range (<= 128 for P = 12, W = 6)
 //!   cardinality counted very accurately (within hash collisions chance)
 //! - For large cardinality range HyperLogLog++ is used with LogLog-Beta bias correction.
 //!   - Expected error (1.04 / sqrt(2^P)):

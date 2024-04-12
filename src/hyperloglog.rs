@@ -67,14 +67,6 @@ impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
         self.update_rank(idx, rank);
     }
 
-    /// Insert hash into `HyperLogLog` representation.
-    #[inline]
-    pub(crate) fn insert(&mut self, hash: u64) {
-        let idx = (hash & ((1 << P) - 1)) as u32;
-        let rank = (!hash >> P).trailing_zeros() + 1;
-        self.update_rank(idx, rank);
-    }
-
     /// Return normal index and rank from encoded sparse hash
     #[inline]
     fn decode_hash(h: u32) -> (u32, u32) {

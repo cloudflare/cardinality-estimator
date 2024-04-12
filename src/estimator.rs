@@ -75,19 +75,13 @@ pub struct CardinalityEstimator<
 #[derive(Debug, PartialEq)]
 pub enum Representation {
     Small = 0,
-    Slice = 1,
-    HashSet = 2,
-    HyperLogLog = 3,
+    Array = 1,
+    HLL = 3,
 }
 
 impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P, W, H> {
     /// Ensure that `P` and `W` are in correct range at compile time
     const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
-    /// Number of HyperLogLog registers
-    const M: usize = 1 << P;
-    /// HyperLogLog representation `u32` slice length based on #registers, stored zero registers, harmonic sum, and
-    /// one extra element for branchless register updates (see `set_register` for more details).
-    const HLL_SLICE_LEN: usize = Self::M * W / 32 + 3;
 
     /// Creates new instance of `CardinalityEstimator`
     #[inline]
@@ -121,26 +115,37 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Insert hash into `CardinalityEstimator`
     #[inline]
     pub fn insert_hash(&mut self, hash: u64) {
-        if self.representation() == HyperLogLog {
-            let idx = (hash & ((1 << P) - 1)) as u32;
-            let rank = (!hash >> P).trailing_zeros() + 1;
-            Self::insert_into_hll(self.as_hll_slice_mut(), idx, rank);
-        } else {
-            self.insert_encoded_hash(Self::encode_hash(hash));
-        }
+        self.insert_encoded_hash(Self::encode_hash(hash));
     }
 
     /// Insert encoded hash into `CardinalityEstimator`
     #[inline]
     fn insert_encoded_hash(&mut self, h: u32) {
         match self.representation() {
-            Small => self.insert_into_small(h),
-            Slice => self.insert_into_slice(h),
-            HashSet => self.insert_into_set(h),
-            HyperLogLog => {
-                let (idx, rank) = Self::decode_hash(h);
-                Self::insert_into_hll(self.as_hll_slice_mut(), idx, rank);
+            Representation::Small => {
+                let mut small = Small::from(self.data);
+                self.data = if small.insert(h) {
+                    small.into()
+                } else {
+                    // upgrade from `Small` to `Array` representation
+                    let items = small.items();
+                    let arr = Array::from_vec(vec![items[0], items[1], h, 0], 3);
+                    arr.into()
+                };
             }
+            Representation::Array => {
+                let mut arr = Array::from(self.data);
+                self.data = if arr.insert(h) {
+                    arr.into()
+                } else {
+                    // upgrade from `Array` to `HyperLogLog` representation
+                    let mut hll = HyperLogLog::<P, W>::new(&arr);
+                    arr.destroy();
+                    hll.insert_encoded_hash(h);
+                    hll.into()
+                }
+            }
+            Representation::HLL => HyperLogLog::<P, W>::from(self.data).insert_encoded_hash(h),
         }
     }
 
@@ -148,10 +153,9 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     #[inline]
     pub fn estimate(&self) -> usize {
         match self.representation() {
-            Small => self.estimate_small(),
-            Slice => self.slice_len(),
-            HashSet => self.as_hashset().len(),
-            HyperLogLog => self.estimate_hll(),
+            Representation::Small => Small::from(self.data).estimate(),
+            Representation::Array => Array::from(self.data).estimate(),
+            Representation::HLL => HyperLogLog::<P, W>::from(self.data).estimate(),
         }
     }
 
@@ -159,199 +163,44 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     #[inline]
     pub fn merge(&mut self, rhs: &Self) {
         match (self.representation(), rhs.representation()) {
-            (_, Small) => {
-                let h1 = rhs.small_h1();
-                let h2 = rhs.small_h2();
-                if h1 != 0 {
-                    self.insert_encoded_hash(h1);
-                }
-                if h2 != 0 {
-                    self.insert_encoded_hash(h2);
-                }
-            }
-            (_, Slice) => {
-                for &h in &rhs.as_slice()[..rhs.slice_len()] {
-                    self.insert_encoded_hash(h);
-                }
-            }
-            (_, HashSet) => {
-                for &h in rhs.as_hashset() {
-                    self.insert_encoded_hash(h);
-                }
-            }
-            (Small, HyperLogLog) => {
-                let mut data = rhs.as_hll_slice().to_vec();
-                let h1 = self.small_h1();
-                let h2 = self.small_h2();
-                if h1 != 0 {
-                    let (idx, rank) = Self::decode_hash(h1);
-                    Self::insert_into_hll(&mut data, idx, rank);
-                }
-                if h2 != 0 {
-                    let (idx, rank) = Self::decode_hash(h2);
-                    Self::insert_into_hll(&mut data, idx, rank);
-                }
-                self.set_hll_data(data);
-            }
-            (Slice, HyperLogLog) => {
-                let slice_len = self.slice_len();
-                let slice_data = self.as_slice_mut();
-                let mut data = rhs.as_hll_slice().to_vec();
-                for &h in &slice_data[..slice_len] {
-                    let (idx, rank) = Self::decode_hash(h);
-                    Self::insert_into_hll(&mut data, idx, rank);
-                }
-                drop(unsafe { Box::from_raw(slice_data) });
-                self.set_hll_data(data);
-            }
-            (HashSet, HyperLogLog) => {
-                let hashset_data = self.as_hashset_mut();
-                let mut data = rhs.as_hll_slice().to_vec();
-                for &h in hashset_data.iter() {
-                    let (idx, rank) = Self::decode_hash(h);
-                    Self::insert_into_hll(&mut data, idx, rank);
-                }
-                drop(unsafe { Box::from_raw(hashset_data) });
-                self.set_hll_data(data);
-            }
-            (HyperLogLog, HyperLogLog) => {
-                let lhs_data = self.as_hll_slice_mut();
-                let rhs_data = rhs.as_hll_slice();
-                for idx in 0..Self::M as u32 {
-                    let lhs_rank = get_register::<W>(lhs_data, idx);
-                    let rhs_rank = get_register::<W>(rhs_data, idx);
-                    if rhs_rank > lhs_rank {
-                        set_register::<W>(lhs_data, idx, lhs_rank, rhs_rank);
+            (_, Representation::Small) => {
+                let hashes = Small::from(rhs.data).items();
+                for h in hashes {
+                    if h != 0 {
+                        self.insert_encoded_hash(h);
                     }
                 }
             }
-        }
-    }
-
-    /// Return 1-st encoded hash assuming small representation
-    #[inline]
-    fn small_h1(&self) -> u32 {
-        ((self.data >> 2) & SMALL_MASK) as u32
-    }
-
-    /// Return 2-nd encoded hash assuming small representation
-    #[inline]
-    fn small_h2(&self) -> u32 {
-        ((self.data >> 33) & SMALL_MASK) as u32
-    }
-
-    /// Insert encoded hash into small representation
-    /// with potential upgrade to slice representation
-    #[inline]
-    fn insert_into_small(&mut self, h: u32) {
-        // Retrieve 1-st encoded hash
-        let h1 = self.small_h1();
-        if h1 == 0 {
-            self.data |= (h as usize) << 2;
-            return;
-        }
-        if h1 == h {
-            return;
-        }
-        // Retrieve 2-nd encoded hash
-        let h2 = self.small_h2();
-        if h2 == 0 {
-            self.data |= (h as usize) << 33;
-            return;
-        }
-        if h2 == h {
-            return;
-        }
-
-        // both hashes occupied -> upgrade to slice representation
-        self.set_slice_data(vec![h1, h2, h, 0], 3);
-    }
-
-    /// Insert encoded hash into slice representation
-    #[inline]
-    fn insert_into_slice(&mut self, h: u32) {
-        let len = self.slice_len();
-        let data = self.as_slice_mut();
-        let cap = data.len();
-
-        let found = if cap == 4 {
-            contains_vectorized::<4>(&data, h)
-        } else {
-            // calculate rounded up slice length for efficient look up in batches
-            let rlen = 8 * len.div_ceil(8);
-            contains_vectorized::<8>(&data[..rlen], h)
-        };
-
-        if found {
-            return;
-        }
-
-        if len < cap {
-            // if there are available slots in current slice - append to it
-            *unsafe { data.get_unchecked_mut(len) } = h;
-            self.data = ((len + 1) << 56) | (PTR_MASK & data.as_ptr() as usize) | (Slice as usize);
-            return;
-        }
-
-        if cap < MAX_SLICE_CAPACITY {
-            let mut new_data = vec![0; cap * 2];
-            new_data[..len].copy_from_slice(data);
-            new_data[len] = h;
-            drop(unsafe { Box::from_raw(data) });
-            self.set_slice_data(new_data, len + 1);
-        } else {
-            let mut set = Box::new(HashSet::with_capacity(cap + 1));
-            for h in data {
-                set.insert(*h);
-            }
-            set.insert(h);
-
-            let ptr = Box::into_raw(set);
-            self.data = (ptr as usize) | (HashSet as usize);
-        }
-    }
-
-    /// Insert encoded hash into hashset representation
-    #[inline]
-    fn insert_into_set(&mut self, h: u32) {
-        let set = self.as_hashset_mut();
-
-        if set.capacity() == set.len() {
-            let (_, layout) = set.raw_table().allocation_info();
-            // if doubling hashset capacity exceeds HyperLogLog representation size - migrate to it
-            if 2 * layout.size() > Self::HLL_SLICE_LEN * size_of::<u32>() {
-                let mut data = vec![0; Self::HLL_SLICE_LEN];
-                data[0] = Self::M as u32;
-                data[1] = (Self::M as f32).to_bits();
-
-                for &h in set.iter() {
-                    let (idx, new_rank) = Self::decode_hash(h);
-                    Self::insert_into_hll(&mut data, idx, new_rank);
+            (_, Representation::Array) => {
+                for &h in Array::from(rhs.data).deref() {
+                    self.insert_encoded_hash(h);
                 }
-
-                drop(unsafe { Box::from_raw(set) });
-                self.set_hll_data(data);
-                self.insert_encoded_hash(h);
-
-                return;
+            }
+            (Representation::Small, Representation::HLL) => {
+                let hashes = Small::from(self.data).items();
+                let mut hll = HyperLogLog::<P, W>::from(rhs.data).clone();
+                for h in hashes {
+                    if h != 0 {
+                        hll.insert_encoded_hash(h)
+                    }
+                }
+                self.data = hll.into();
+            }
+            (Representation::Array, Representation::HLL) => {
+                let mut hll = HyperLogLog::<P, W>::from(rhs.data).clone();
+                let mut arr = Array::from(self.data);
+                for &h in arr.deref() {
+                    hll.insert_encoded_hash(h)
+                }
+                arr.destroy();
+                self.data = hll.into();
+            }
+            (Representation::HLL, Representation::HLL) => {
+                let mut lhs = HyperLogLog::<P, W>::from(self.data);
+                let rhs = HyperLogLog::<P, W>::from(rhs.data);
+                lhs.merge(&rhs);
             }
         }
-
-        set.insert(h);
-    }
-
-    /// Set slice representation with new data
-    #[inline]
-    pub(crate) fn set_slice_data(&mut self, data: Vec<u32>, len: usize) {
-        self.data = (len << 56) | (PTR_MASK & data.as_ptr() as usize) | (Slice as usize);
-        std::mem::forget(data);
-    }
-
-    /// Set HyperLogLog representation with new data
-    #[inline]
-    fn set_hll_data(&mut self, data: Vec<u32>) {
-        self.data = (PTR_MASK & (data.as_ptr() as usize)) | (HyperLogLog as usize);
-        std::mem::forget(data);
     }
 
     /// Compute the sparse encoding of the given hash
@@ -362,104 +211,13 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         (idx << W) | rank
     }
 
-    /// Return normal index and rank from encoded sparse hash
-    #[inline]
-    fn decode_hash(h: u32) -> (u32, u32) {
-        let rank = h & ((1 << W) - 1);
-        let idx = (h >> W) & ((1 << P) - 1);
-        (idx, rank)
-    }
-
-    /// Return cardinality estimate of small representation
-    #[inline]
-    fn estimate_small(&self) -> usize {
-        match (self.small_h1(), self.small_h2()) {
-            (0, 0) => 0,
-            (_, 0) => 1,
-            (_, _) => 2,
-        }
-    }
-
-    /// Return cardinality estimate of slice representation
-    #[inline]
-    fn slice_len(&self) -> usize {
-        self.data >> 56
-    }
-
-    /// Return underlying slice of `u32` for slice representation
-    #[inline]
-    fn as_slice(&self) -> &[u32] {
-        let ptr = (self.data & PTR_MASK) as *const u32;
-        let cap = self.slice_len().next_power_of_two();
-        unsafe { slice::from_raw_parts(ptr, cap) }
-    }
-
-    /// Return mutable underlying slice of `u32` for slice representation
-    #[inline]
-    fn as_slice_mut(&mut self) -> &mut [u32] {
-        let ptr = (self.data & PTR_MASK) as *mut u32;
-        let cap = self.slice_len().next_power_of_two();
-        unsafe { slice::from_raw_parts_mut(ptr, cap) }
-    }
-
-    /// Return underlying `HashSet` of `u32` for hashset representation
-    #[inline]
-    fn as_hashset(&self) -> &HashSet<u32> {
-        unsafe { &*((self.data & PTR_MASK) as *const HashSet<u32>) }
-    }
-
-    /// Return mutable underlying `HashSet` of `u32` for hashset representation
-    #[inline]
-    fn as_hashset_mut(&mut self) -> &mut HashSet<u32> {
-        unsafe { &mut *((self.data & PTR_MASK) as *mut HashSet<u32>) }
-    }
-
-    /// Return underlying slice of `u32` for HyperLogLog representation
-    #[inline]
-    fn as_hll_slice(&self) -> &[u32] {
-        let ptr = (self.data & PTR_MASK) as *const u32;
-        unsafe { slice::from_raw_parts(ptr, Self::HLL_SLICE_LEN) }
-    }
-
-    /// Return mutable underlying slice of `u32` for HyperLogLog representation
-    #[inline]
-    fn as_hll_slice_mut(&mut self) -> &mut [u32] {
-        let ptr = (self.data & PTR_MASK) as *mut u32;
-        unsafe { slice::from_raw_parts_mut(ptr, Self::HLL_SLICE_LEN) }
-    }
-
-    /// Insert encoded hash into HyperLogLog representation
-    #[inline]
-    fn insert_into_hll(data: &mut [u32], idx: u32, new_rank: u32) {
-        let old_rank = get_register::<W>(data, idx);
-        if new_rank > old_rank {
-            set_register::<W>(data, idx, old_rank, new_rank);
-        }
-    }
-
-    /// Return cardinality estimate of HyperLogLog representation
-    #[inline]
-    fn estimate_hll(&self) -> usize {
-        let data = self.as_hll_slice();
-        let zeros = unsafe { *data.get_unchecked(0) };
-        let sum = f32::from_bits(unsafe { *data.get_unchecked(1) }) as f64;
-        let estimate = alpha(Self::M) * ((Self::M * (Self::M - zeros as usize)) as f64)
-            / (sum + beta_horner(zeros as f64, P));
-        (estimate + 0.5) as usize
-    }
-
     /// Return memory size of `CardinalityEstimator`
     pub fn size_of(&self) -> usize {
-        size_of::<Self>()
-            + match self.representation() {
-                Small => 0,
-                Slice => size_of_val(self.as_slice()),
-                HashSet => {
-                    let (_, layout) = self.as_hashset().raw_table().allocation_info();
-                    layout.size()
-                }
-                HyperLogLog => size_of_val(self.as_hll_slice()),
-            }
+        match self.representation() {
+            Representation::Small => Small::from(self.data).size_of(),
+            Representation::Array => Array::from(self.data).size_of(),
+            Representation::HLL => HyperLogLog::<P, W>::from(self.data).size_of(),
+        }
     }
 }
 
@@ -482,18 +240,12 @@ impl<const P: usize, const W: usize, H: Hasher + Default> Clone for CardinalityE
 
 impl<const P: usize, const W: usize, H: Hasher + Default> Drop for CardinalityEstimator<P, W, H> {
     /// Free memory occupied by `CardinalityEstimator`
+    #[inline]
     fn drop(&mut self) {
         match self.representation() {
-            Small => {}
-            Slice => {
-                drop(unsafe { Box::from_raw(self.as_slice_mut()) });
-            }
-            HashSet => {
-                drop(unsafe { Box::from_raw(self.as_hashset_mut()) });
-            }
-            HyperLogLog => {
-                drop(unsafe { Box::from_raw(self.as_hll_slice_mut()) });
-            }
+            Representation::Small => {}
+            Representation::Array => Array::from(self.data).destroy(),
+            Representation::HLL => HyperLogLog::<P, W>::from(self.data).destroy(),
         }
     }
 }
@@ -508,10 +260,12 @@ impl<const P: usize, const W: usize, H: Hasher + Default> PartialEq
         }
 
         match self.representation() {
-            Small => self.data == rhs.data,
-            Slice => self.as_slice() == rhs.as_slice(),
-            HashSet => self.as_hashset() == rhs.as_hashset(),
-            HyperLogLog => self.as_hll_slice() == rhs.as_hll_slice(),
+            Representation::Small => self.data == rhs.data,
+            Representation::Array => Array::from(self.data) == Array::from(rhs.data),
+            Representation::HLL => {
+                HyperLogLog::<P, W>::from(self.data).data
+                    == HyperLogLog::<P, W>::from(rhs.data).data
+            }
         }
     }
 }

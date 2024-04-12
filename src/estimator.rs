@@ -736,6 +736,17 @@ pub mod tests {
 
         let avg_relative_error = total_relative_error / ((n + 1) as f64);
 
+        // Compute the expected standard error for HyperLogLog based on the precision
+        let standard_error = 1.04 / 2.0f64.powi(P as i32).sqrt();
+        let tolerance = 1.2;
+
+        assert!(
+            avg_relative_error <= standard_error * tolerance,
+            "Average relative error {} exceeds acceptable threshold {}",
+            avg_relative_error,
+            standard_error * tolerance
+        );
+
         format!("estimator = {:?} avg_err = {:.4}", e, avg_relative_error)
     }
 

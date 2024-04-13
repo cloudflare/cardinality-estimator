@@ -6,7 +6,7 @@ build:
 	cargo build
 
 test:
-	cargo test
+	cargo test --features with_serde
 
 bench:
 	cargo bench

@@ -10,9 +10,13 @@
 //! - data[0..N]    - store `N` encoded hashes
 //! - data[N..]     - store zeros used for future hashes
 
+use std::fmt::{Debug, Formatter};
 use std::mem::{size_of, size_of_val};
 use std::ops::Deref;
 use std::slice;
+
+use crate::hyperloglog::HyperLogLog;
+use crate::representation::RepresentationTrait;
 
 /// Maximum number of elements stored in array representation
 const MAX_CAPACITY: usize = 128;
@@ -22,8 +26,7 @@ const LEN_OFFSET: usize = 56;
 const PTR_MASK: usize = ((1 << LEN_OFFSET) - 1) & !3;
 
 /// Array representation container
-#[derive(Debug, PartialEq)]
-pub(crate) struct Array<'a> {
+pub(crate) struct Array<'a, const P: usize, const W: usize> {
     /// Number of items stored in the array
     len: usize,
     /// Capacity of the array
@@ -32,13 +35,7 @@ pub(crate) struct Array<'a> {
     arr: &'a mut [u32],
 }
 
-impl<'a> Array<'a> {
-    /// Return cardinality estimate of `Array` representation
-    #[inline]
-    pub(crate) fn estimate(&self) -> usize {
-        self.len
-    }
-
+impl<'a, const P: usize, const W: usize> Array<'a, P, W> {
     /// Insert encoded hash into `Array` representation
     /// Returns true on success, false otherwise.
     #[inline]
@@ -70,7 +67,7 @@ impl<'a> Array<'a> {
             let new_arr = Self::from_vec(vec![0; self.cap * 2], self.len + 1);
             new_arr.arr[..self.len].copy_from_slice(self.arr);
             new_arr.arr[self.len] = h;
-            self.destroy();
+            self.drop();
             *self = new_arr;
             return true;
         };
@@ -78,15 +75,9 @@ impl<'a> Array<'a> {
         false
     }
 
-    /// Return memory size of `Array` representation
-    #[inline]
-    pub(crate) fn size_of(&self) -> usize {
-        size_of::<usize>() + size_of_val(self.arr)
-    }
-
     /// Create new instance of `Array` representation from vector
     #[inline]
-    pub(crate) fn from_vec(mut arr: Vec<u32>, len: usize) -> Array<'a> {
+    pub(crate) fn from_vec(mut arr: Vec<u32>, len: usize) -> Array<'a, P, W> {
         let cap = arr.len();
         let ptr = arr.as_mut_ptr();
         std::mem::forget(arr);
@@ -94,16 +85,61 @@ impl<'a> Array<'a> {
         let arr = unsafe { slice::from_raw_parts_mut(ptr, cap) };
         Self { len, cap, arr }
     }
+}
+
+impl<'a, const P: usize, const W: usize> RepresentationTrait for Array<'a, P, W> {
+    /// Insert encoded hash into `HyperLogLog` representation.
+    #[inline]
+    fn insert_encoded_hash(&mut self, h: u32) -> usize {
+        if self.insert(h) {
+            self.to_data()
+        } else {
+            // upgrade from `Array` to `HyperLogLog` representation
+            let mut hll = HyperLogLog::<P, W>::new(self);
+            self.drop();
+            hll.insert_encoded_hash(h)
+        }
+    }
+
+    /// Return cardinality estimate of `Array` representation
+    #[inline]
+    fn estimate(&self) -> usize {
+        self.len
+    }
+
+    /// Return memory size of `Array` representation
+    #[inline]
+    fn size_of(&self) -> usize {
+        size_of::<usize>() + size_of_val(self.arr)
+    }
 
     /// Free memory occupied by the `Array` representation
     #[inline]
-    pub(crate) fn destroy(&mut self) {
+    fn drop(&mut self) {
         // SAFETY: caller of this method must ensure that `self.arr` holds valid slice elements.
         drop(unsafe { Box::from_raw(self.arr) });
     }
+
+    /// Convert `Array` representation to `data`
+    #[inline]
+    fn to_data(&self) -> usize {
+        (self.len << LEN_OFFSET) | (PTR_MASK & self.arr.as_ptr() as usize) | 1
+    }
 }
 
-impl From<usize> for Array<'_> {
+impl<'a, const P: usize, const W: usize> Debug for Array<'a, P, W> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_string())
+    }
+}
+
+impl<'a, const P: usize, const W: usize> PartialEq for Array<'a, P, W> {
+    fn eq(&self, other: &Self) -> bool {
+        self.deref() == other.deref()
+    }
+}
+
+impl<'a, const P: usize, const W: usize> From<usize> for Array<'a, P, W> {
     /// Create new instance of `Array` from given `data`
     #[inline]
     fn from(data: usize) -> Self {
@@ -116,15 +152,7 @@ impl From<usize> for Array<'_> {
     }
 }
 
-impl From<Array<'_>> for usize {
-    /// Convert instance of `Array` back to usize
-    #[inline]
-    fn from(v: Array) -> Self {
-        (v.len << LEN_OFFSET) | (PTR_MASK & v.arr.as_ptr() as usize) | 1
-    }
-}
-
-impl<'a> Deref for Array<'a> {
+impl<'a, const P: usize, const W: usize> Deref for Array<'a, P, W> {
     type Target = [u32];
 
     fn deref(&self) -> &Self::Target {

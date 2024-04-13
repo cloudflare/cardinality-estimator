@@ -4,6 +4,7 @@
 mod array;
 pub mod estimator;
 mod hyperloglog;
+mod representation;
 #[cfg(feature = "with_serde")]
 mod serde;
 mod small;

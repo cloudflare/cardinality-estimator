@@ -12,11 +12,13 @@ keywords = ["cardinality", "distinct-count", "hyperloglog", "probabilistic", "sk
 categories = ["algorithms", "data-structures"]
 
 [dependencies]
+enum_dispatch = "0.3.13"
 serde = { version = "1.0.197", optional = true }
 wyhash = "0.5.0"
 
 [dev-dependencies]
 test-case = "3.3.1"
+serde_json = "1.0.115"
 
 [[bench]]
 name = "cardinality_estimator"

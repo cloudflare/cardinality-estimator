@@ -13,13 +13,16 @@
 //! - data[1]       - stores harmonic sum of HyperLogLog registers (`f32` transmuted into `u32`).
 //! - data[2..]     - stores register ranks using `W` bits per each register.
 
+use std::fmt::{Debug, Formatter};
 use std::mem::{size_of, size_of_val};
 use std::slice;
+
+use crate::representation::RepresentationTrait;
 
 /// Mask used for accessing heap allocated data stored at the pointer in `data` field.
 const PTR_MASK: usize = !3;
 
-#[derive(Debug)]
+#[derive(PartialEq)]
 pub(crate) struct HyperLogLog<'a, const P: usize = 12, const W: usize = 6> {
     pub(crate) data: &'a mut [u32],
 }
@@ -47,24 +50,6 @@ impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
         }
 
         hll
-    }
-
-    /// Return cardinality estimate of `HyperLogLog` representation
-    #[inline]
-    pub(crate) fn estimate(&self) -> usize {
-        // SAFETY: `self.data` is always guaranteed to have 0-th and 1-st elements.
-        let zeros = unsafe { *self.data.get_unchecked(0) };
-        let sum = f32::from_bits(unsafe { *self.data.get_unchecked(1) }) as f64;
-        let estimate = alpha(Self::M) * ((Self::M * (Self::M - zeros as usize)) as f64)
-            / (sum + beta_horner(zeros as f64, P));
-        (estimate + 0.5) as usize
-    }
-
-    /// Insert encoded hash into `HyperLogLog` representation.
-    #[inline]
-    pub(crate) fn insert_encoded_hash(&mut self, h: u32) {
-        let (idx, rank) = Self::decode_hash(h);
-        self.update_rank(idx, rank);
     }
 
     /// Return normal index and rank from encoded sparse hash
@@ -130,12 +115,6 @@ impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
         zeros_and_sum[1] = sum.to_bits();
     }
 
-    /// Return memory size of `HyperLogLog`
-    #[inline]
-    pub(crate) fn size_of(&self) -> usize {
-        size_of::<usize>() + size_of_val(self.data)
-    }
-
     /// Merge two `HyperLogLog` representations.
     #[inline]
     pub(crate) fn merge(&mut self, rhs: &HyperLogLog<P, W>) {
@@ -147,12 +126,45 @@ impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
             }
         }
     }
+}
+
+impl<'a, const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'a, P, W> {
+    /// Insert encoded hash into `HyperLogLog` representation.
+    #[inline]
+    fn insert_encoded_hash(&mut self, h: u32) -> usize {
+        let (idx, rank) = Self::decode_hash(h);
+        self.update_rank(idx, rank);
+        self.to_data()
+    }
+
+    /// Return cardinality estimate of `HyperLogLog` representation
+    #[inline]
+    fn estimate(&self) -> usize {
+        // SAFETY: `self.data` is always guaranteed to have 0-th and 1-st elements.
+        let zeros = unsafe { *self.data.get_unchecked(0) };
+        let sum = f32::from_bits(unsafe { *self.data.get_unchecked(1) }) as f64;
+        let estimate = alpha(Self::M) * ((Self::M * (Self::M - zeros as usize)) as f64)
+            / (sum + beta_horner(zeros as f64, P));
+        (estimate + 0.5) as usize
+    }
+
+    /// Return memory size of `HyperLogLog`
+    #[inline]
+    fn size_of(&self) -> usize {
+        size_of::<usize>() + size_of_val(self.data)
+    }
 
     /// Free memory occupied by the `HyperLogLog` representation
     #[inline]
-    pub(crate) fn destroy(&mut self) {
+    fn drop(&mut self) {
         // SAFETY: caller of this method must ensure that `self.data` holds valid slice elements.
         drop(unsafe { Box::from_raw(self.data) });
+    }
+
+    /// Convert `HyperLogLog` representation to `data`
+    #[inline]
+    fn to_data(&self) -> usize {
+        (PTR_MASK & self.data.as_ptr() as usize) | 3
     }
 }
 
@@ -177,13 +189,6 @@ impl<'a, const P: usize, const W: usize> From<Vec<u32>> for HyperLogLog<'a, P, W
     }
 }
 
-impl<const P: usize, const W: usize> From<HyperLogLog<'_, P, W>> for usize {
-    #[inline]
-    fn from(value: HyperLogLog<'_, P, W>) -> Self {
-        (PTR_MASK & value.data.as_ptr() as usize) | 3
-    }
-}
-
 impl<const P: usize, const W: usize> Clone for HyperLogLog<'_, P, W> {
     /// Clone `HyperLogLog` representation
     #[inline]
@@ -192,6 +197,12 @@ impl<const P: usize, const W: usize> Clone for HyperLogLog<'_, P, W> {
         let data = (PTR_MASK & hll_data.as_mut_ptr() as usize) | 3;
         std::mem::forget(hll_data);
         Self::from(data)
+    }
+}
+
+impl<const P: usize, const W: usize> Debug for HyperLogLog<'_, P, W> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_string())
     }
 }
 

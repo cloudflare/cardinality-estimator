@@ -45,18 +45,12 @@
 //! # Data Storage Format
 //! The cardinality estimator stores data in one of three formats: `Small`, `Array`, and `HyperLogLog`.
 //! See corresponding modules (`small`, `array`, `hyperloglog`) for more details.
-use std::fmt::{Debug, Formatter};
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 use std::ops::Deref;
 
 use wyhash::WyHash;
 
-use crate::array::Array;
-use crate::hyperloglog::HyperLogLog;
-use crate::small::Small;
-
-/// Mask used for storing and retrieving representation type stored in lowest 2 bits of `data` field.
-const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
+use crate::representation::{Representation, RepresentationTrait};
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
@@ -69,15 +63,6 @@ pub struct CardinalityEstimator<
     pub(crate) data: usize,
     /// Zero-sized build hasher
     build_hasher: BuildHasherDefault<H>,
-}
-
-/// Four representation types supported by `CardinalityEstimator`
-#[repr(u8)]
-#[derive(Debug, PartialEq)]
-pub enum Representation {
-    Small = 0,
-    Array = 1,
-    HLL = 3,
 }
 
 impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P, W, H> {
@@ -98,11 +83,10 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
         }
     }
 
-    /// Return representation type of `CardinalityEstimator`
+    /// Returns the representation type of `CardinalityEstimator`.
     #[inline]
-    pub fn representation(&self) -> Representation {
-        // SAFETY: representation is always one of four types stored in lowest 2 bits of `data` field.
-        unsafe { std::mem::transmute((self.data & REPRESENTATION_MASK) as u8) }
+    pub(crate) fn representation(&self) -> Representation<P, W> {
+        Representation::<P, W>::from_data(self.data)
     }
 
     /// Insert a hashable item into `CardinalityEstimator`
@@ -123,84 +107,50 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
     /// Insert encoded hash into `CardinalityEstimator`
     #[inline]
     fn insert_encoded_hash(&mut self, h: u32) {
-        match self.representation() {
-            Representation::Small => {
-                let mut small = Small::from(self.data);
-                self.data = if small.insert(h) {
-                    small.into()
-                } else {
-                    // upgrade from `Small` to `Array` representation
-                    let items = small.items();
-                    let arr = Array::from_vec(vec![items[0], items[1], h, 0], 3);
-                    arr.into()
-                };
-            }
-            Representation::Array => {
-                let mut arr = Array::from(self.data);
-                self.data = if arr.insert(h) {
-                    arr.into()
-                } else {
-                    // upgrade from `Array` to `HyperLogLog` representation
-                    let mut hll = HyperLogLog::<P, W>::new(&arr);
-                    arr.destroy();
-                    hll.insert_encoded_hash(h);
-                    hll.into()
-                }
-            }
-            Representation::HLL => HyperLogLog::<P, W>::from(self.data).insert_encoded_hash(h),
-        }
+        self.data = self.representation().insert_encoded_hash(h);
     }
 
     /// Return cardinality estimate
     #[inline]
     pub fn estimate(&self) -> usize {
-        match self.representation() {
-            Representation::Small => Small::from(self.data).estimate(),
-            Representation::Array => Array::from(self.data).estimate(),
-            Representation::HLL => HyperLogLog::<P, W>::from(self.data).estimate(),
-        }
+        self.representation().estimate()
     }
 
     /// Merge cardinality estimators
     #[inline]
     pub fn merge(&mut self, rhs: &Self) {
         match (self.representation(), rhs.representation()) {
-            (_, Representation::Small) => {
-                let hashes = Small::from(rhs.data).items();
-                for h in hashes {
+            (_, Representation::Small(rhs_small)) => {
+                for h in rhs_small.items() {
                     if h != 0 {
                         self.insert_encoded_hash(h);
                     }
                 }
             }
-            (_, Representation::Array) => {
-                for &h in Array::from(rhs.data).deref() {
+            (_, Representation::Array(rhs_arr)) => {
+                for &h in rhs_arr.deref() {
                     self.insert_encoded_hash(h);
                 }
             }
-            (Representation::Small, Representation::HLL) => {
-                let hashes = Small::from(self.data).items();
-                let mut hll = HyperLogLog::<P, W>::from(rhs.data).clone();
-                for h in hashes {
+            (Representation::Small(lhs_small), Representation::HLL(rhs_hll)) => {
+                let mut hll = rhs_hll.clone();
+                for h in lhs_small.items() {
                     if h != 0 {
-                        hll.insert_encoded_hash(h)
+                        hll.insert_encoded_hash(h);
                     }
                 }
-                self.data = hll.into();
+                self.data = hll.to_data();
             }
-            (Representation::Array, Representation::HLL) => {
-                let mut hll = HyperLogLog::<P, W>::from(rhs.data).clone();
-                let mut arr = Array::from(self.data);
-                for &h in arr.deref() {
-                    hll.insert_encoded_hash(h)
+            (Representation::Array(mut lhs_arr), Representation::HLL(rhs_hll)) => {
+                let mut hll = rhs_hll.clone();
+                for &h in lhs_arr.deref() {
+                    hll.insert_encoded_hash(h);
                 }
-                arr.destroy();
-                self.data = hll.into();
+                lhs_arr.drop();
+                self.data = hll.to_data();
             }
-            (Representation::HLL, Representation::HLL) => {
-                let mut lhs = HyperLogLog::<P, W>::from(self.data);
-                let rhs = HyperLogLog::<P, W>::from(rhs.data);
-                lhs.merge(&rhs);
+            (Representation::HLL(mut lhs_hll), Representation::HLL(rhs_hll)) => {
+                lhs_hll.merge(&rhs_hll);
             }
         }
     }
@@ -215,11 +165,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> CardinalityEstimator<P
 
     /// Return memory size of `CardinalityEstimator`
     pub fn size_of(&self) -> usize {
-        match self.representation() {
-            Representation::Small => Small::from(self.data).size_of(),
-            Representation::Array => Array::from(self.data).size_of(),
-            Representation::HLL => HyperLogLog::<P, W>::from(self.data).size_of(),
-        }
+        self.representation().size_of()
     }
 }
 
@@ -244,11 +190,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> Drop for CardinalityEs
     /// Free memory occupied by `CardinalityEstimator`
     #[inline]
     fn drop(&mut self) {
-        match self.representation() {
-            Representation::Small => {}
-            Representation::Array => Array::from(self.data).destroy(),
-            Representation::HLL => HyperLogLog::<P, W>::from(self.data).destroy(),
-        }
+        self.representation().drop();
     }
 }
 
@@ -257,30 +199,7 @@ impl<const P: usize, const W: usize, H: Hasher + Default> PartialEq
 {
     /// Compare cardinality estimators
     fn eq(&self, rhs: &Self) -> bool {
-        if self.representation() != rhs.representation() {
-            return false;
-        }
-
-        match self.representation() {
-            Representation::Small => self.data == rhs.data,
-            Representation::Array => Array::from(self.data) == Array::from(rhs.data),
-            Representation::HLL => {
-                HyperLogLog::<P, W>::from(self.data).data
-                    == HyperLogLog::<P, W>::from(rhs.data).data
-            }
-        }
-    }
-}
-
-impl<const P: usize, const W: usize, H: Hasher + Default> Debug for CardinalityEstimator<P, W, H> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{{ representation: {:?}, estimate: {}, size: {} }}",
-            self.representation(),
-            self.estimate(),
-            self.size_of()
-        )
+        self.representation() == rhs.representation()
     }
 }
 
@@ -289,67 +208,67 @@ pub mod tests {
     use super::*;
     use test_case::test_case;
 
-    #[test_case(0 => "estimator = { representation: Small, estimate: 0, size: 8 } avg_err = 0.0000")]
-    #[test_case(1 => "estimator = { representation: Small, estimate: 1, size: 8 } avg_err = 0.0000")]
-    #[test_case(2 => "estimator = { representation: Small, estimate: 2, size: 8 } avg_err = 0.0000")]
-    #[test_case(3 => "estimator = { representation: Array, estimate: 3, size: 24 } avg_err = 0.0000")]
-    #[test_case(4 => "estimator = { representation: Array, estimate: 4, size: 24 } avg_err = 0.0000")]
-    #[test_case(8 => "estimator = { representation: Array, estimate: 8, size: 40 } avg_err = 0.0000")]
-    #[test_case(16 => "estimator = { representation: Array, estimate: 16, size: 72 } avg_err = 0.0000")]
-    #[test_case(17 => "estimator = { representation: Array, estimate: 17, size: 136 } avg_err = 0.0000")]
-    #[test_case(28 => "estimator = { representation: Array, estimate: 28, size: 136 } avg_err = 0.0000")]
-    #[test_case(29 => "estimator = { representation: Array, estimate: 29, size: 136 } avg_err = 0.0000")]
-    #[test_case(56 => "estimator = { representation: Array, estimate: 56, size: 264 } avg_err = 0.0000")]
-    #[test_case(57 => "estimator = { representation: Array, estimate: 57, size: 264 } avg_err = 0.0000")]
-    #[test_case(128 => "estimator = { representation: Array, estimate: 128, size: 520 } avg_err = 0.0000")]
-    #[test_case(129 => "estimator = { representation: HLL, estimate: 131, size: 660 } avg_err = 0.0001")]
-    #[test_case(256 => "estimator = { representation: HLL, estimate: 264, size: 660 } avg_err = 0.0119")]
-    #[test_case(512 => "estimator = { representation: HLL, estimate: 512, size: 660 } avg_err = 0.0151")]
-    #[test_case(1024 => "estimator = { representation: HLL, estimate: 1033, size: 660 } avg_err = 0.0172")]
-    #[test_case(10_000 => "estimator = { representation: HLL, estimate: 10417, size: 660 } avg_err = 0.0281")]
-    #[test_case(100_000 => "estimator = { representation: HLL, estimate: 93099, size: 660 } avg_err = 0.0351")]
+    #[test_case(0 => "representation: Small(estimate: 0, size: 8), avg_err: 0.0000")]
+    #[test_case(1 => "representation: Small(estimate: 1, size: 8), avg_err: 0.0000")]
+    #[test_case(2 => "representation: Small(estimate: 2, size: 8), avg_err: 0.0000")]
+    #[test_case(3 => "representation: Array(estimate: 3, size: 24), avg_err: 0.0000")]
+    #[test_case(4 => "representation: Array(estimate: 4, size: 24), avg_err: 0.0000")]
+    #[test_case(8 => "representation: Array(estimate: 8, size: 40), avg_err: 0.0000")]
+    #[test_case(16 => "representation: Array(estimate: 16, size: 72), avg_err: 0.0000")]
+    #[test_case(17 => "representation: Array(estimate: 17, size: 136), avg_err: 0.0000")]
+    #[test_case(28 => "representation: Array(estimate: 28, size: 136), avg_err: 0.0000")]
+    #[test_case(29 => "representation: Array(estimate: 29, size: 136), avg_err: 0.0000")]
+    #[test_case(56 => "representation: Array(estimate: 56, size: 264), avg_err: 0.0000")]
+    #[test_case(57 => "representation: Array(estimate: 57, size: 264), avg_err: 0.0000")]
+    #[test_case(128 => "representation: Array(estimate: 128, size: 520), avg_err: 0.0000")]
+    #[test_case(129 => "representation: HLL(estimate: 131, size: 660), avg_err: 0.0001")]
+    #[test_case(256 => "representation: HLL(estimate: 264, size: 660), avg_err: 0.0119")]
+    #[test_case(512 => "representation: HLL(estimate: 512, size: 660), avg_err: 0.0151")]
+    #[test_case(1024 => "representation: HLL(estimate: 1033, size: 660), avg_err: 0.0172")]
+    #[test_case(10_000 => "representation: HLL(estimate: 10417, size: 660), avg_err: 0.0281")]
+    #[test_case(100_000 => "representation: HLL(estimate: 93099, size: 660), avg_err: 0.0351")]
     fn test_estimator_p10_w5(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<10, 5>::new(), n)
     }
 
-    #[test_case(0 => "estimator = { representation: Small, estimate: 0, size: 8 } avg_err = 0.0000")]
-    #[test_case(1 => "estimator = { representation: Small, estimate: 1, size: 8 } avg_err = 0.0000")]
-    #[test_case(2 => "estimator = { representation: Small, estimate: 2, size: 8 } avg_err = 0.0000")]
-    #[test_case(3 => "estimator = { representation: Array, estimate: 3, size: 24 } avg_err = 0.0000")]
-    #[test_case(4 => "estimator = { representation: Array, estimate: 4, size: 24 } avg_err = 0.0000")]
-    #[test_case(8 => "estimator = { representation: Array, estimate: 8, size: 40 } avg_err = 0.0000")]
-    #[test_case(16 => "estimator = { representation: Array, estimate: 16, size: 72 } avg_err = 0.0000")]
-    #[test_case(32 => "estimator = { representation: Array, estimate: 32, size: 136 } avg_err = 0.0000")]
-    #[test_case(64 => "estimator = { representation: Array, estimate: 64, size: 264 } avg_err = 0.0000")]
-    #[test_case(128 => "estimator = { representation: Array, estimate: 128, size: 520 } avg_err = 0.0000")]
-    #[test_case(129 => "estimator = { representation: HLL, estimate: 130, size: 3092 } avg_err = 0.0001")]
-    #[test_case(256 => "estimator = { representation: HLL, estimate: 254, size: 3092 } avg_err = 0.0029")]
-    #[test_case(512 => "estimator = { representation: HLL, estimate: 498, size: 3092 } avg_err = 0.0068")]
-    #[test_case(1024 => "estimator = { representation: HLL, estimate: 1012, size: 3092 } avg_err = 0.0130")]
-    #[test_case(4096 => "estimator = { representation: HLL, estimate: 4105, size: 3092 } avg_err = 0.0089")]
-    #[test_case(10_000 => "estimator = { representation: HLL, estimate: 10068, size: 3092 } avg_err = 0.0087")]
-    #[test_case(100_000 => "estimator = { representation: HLL, estimate: 95628, size: 3092 } avg_err = 0.0182")]
+    #[test_case(0 => "representation: Small(estimate: 0, size: 8), avg_err: 0.0000")]
+    #[test_case(1 => "representation: Small(estimate: 1, size: 8), avg_err: 0.0000")]
+    #[test_case(2 => "representation: Small(estimate: 2, size: 8), avg_err: 0.0000")]
+    #[test_case(3 => "representation: Array(estimate: 3, size: 24), avg_err: 0.0000")]
+    #[test_case(4 => "representation: Array(estimate: 4, size: 24), avg_err: 0.0000")]
+    #[test_case(8 => "representation: Array(estimate: 8, size: 40), avg_err: 0.0000")]
+    #[test_case(16 => "representation: Array(estimate: 16, size: 72), avg_err: 0.0000")]
+    #[test_case(32 => "representation: Array(estimate: 32, size: 136), avg_err: 0.0000")]
+    #[test_case(64 => "representation: Array(estimate: 64, size: 264), avg_err: 0.0000")]
+    #[test_case(128 => "representation: Array(estimate: 128, size: 520), avg_err: 0.0000")]
+    #[test_case(129 => "representation: HLL(estimate: 130, size: 3092), avg_err: 0.0001")]
+    #[test_case(256 => "representation: HLL(estimate: 254, size: 3092), avg_err: 0.0029")]
+    #[test_case(512 => "representation: HLL(estimate: 498, size: 3092), avg_err: 0.0068")]
+    #[test_case(1024 => "representation: HLL(estimate: 1012, size: 3092), avg_err: 0.0130")]
+    #[test_case(4096 => "representation: HLL(estimate: 4105, size: 3092), avg_err: 0.0089")]
+    #[test_case(10_000 => "representation: HLL(estimate: 10068, size: 3092), avg_err: 0.0087")]
+    #[test_case(100_000 => "representation: HLL(estimate: 95628, size: 3092), avg_err: 0.0182")]
     fn test_estimator_p12_w6(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<12, 6>::new(), n)
     }
 
-    #[test_case(0 => "estimator = { representation: Small, estimate: 0, size: 8 } avg_err = 0.0000")]
-    #[test_case(1 => "estimator = { representation: Small, estimate: 1, size: 8 } avg_err = 0.0000")]
-    #[test_case(2 => "estimator = { representation: Small, estimate: 2, size: 8 } avg_err = 0.0000")]
-    #[test_case(3 => "estimator = { representation: Array, estimate: 3, size: 24 } avg_err = 0.0000")]
-    #[test_case(4 => "estimator = { representation: Array, estimate: 4, size: 24 } avg_err = 0.0000")]
-    #[test_case(8 => "estimator = { representation: Array, estimate: 8, size: 40 } avg_err = 0.0000")]
-    #[test_case(16 => "estimator = { representation: Array, estimate: 16, size: 72 } avg_err = 0.0000")]
-    #[test_case(32 => "estimator = { representation: Array, estimate: 32, size: 136 } avg_err = 0.0000")]
-    #[test_case(64 => "estimator = { representation: Array, estimate: 64, size: 264 } avg_err = 0.0000")]
-    #[test_case(128 => "estimator = { representation: Array, estimate: 128, size: 520 } avg_err = 0.0000")]
-    #[test_case(129 => "estimator = { representation: HLL, estimate: 129, size: 196628 } avg_err = 0.0000")]
-    #[test_case(256 => "estimator = { representation: HLL, estimate: 256, size: 196628 } avg_err = 0.0000")]
-    #[test_case(512 => "estimator = { representation: HLL, estimate: 511, size: 196628 } avg_err = 0.0004")]
-    #[test_case(1024 => "estimator = { representation: HLL, estimate: 1022, size: 196628 } avg_err = 0.0014")]
-    #[test_case(4096 => "estimator = { representation: HLL, estimate: 4100, size: 196628 } avg_err = 0.0009")]
-    #[test_case(10_000 => "estimator = { representation: HLL, estimate: 10007, size: 196628 } avg_err = 0.0008")]
-    #[test_case(100_000 => "estimator = { representation: HLL, estimate: 100240, size: 196628 } avg_err = 0.0011")]
+    #[test_case(0 => "representation: Small(estimate: 0, size: 8), avg_err: 0.0000")]
+    #[test_case(1 => "representation: Small(estimate: 1, size: 8), avg_err: 0.0000")]
+    #[test_case(2 => "representation: Small(estimate: 2, size: 8), avg_err: 0.0000")]
+    #[test_case(3 => "representation: Array(estimate: 3, size: 24), avg_err: 0.0000")]
+    #[test_case(4 => "representation: Array(estimate: 4, size: 24), avg_err: 0.0000")]
+    #[test_case(8 => "representation: Array(estimate: 8, size: 40), avg_err: 0.0000")]
+    #[test_case(16 => "representation: Array(estimate: 16, size: 72), avg_err: 0.0000")]
+    #[test_case(32 => "representation: Array(estimate: 32, size: 136), avg_err: 0.0000")]
+    #[test_case(64 => "representation: Array(estimate: 64, size: 264), avg_err: 0.0000")]
+    #[test_case(128 => "representation: Array(estimate: 128, size: 520), avg_err: 0.0000")]
+    #[test_case(129 => "representation: HLL(estimate: 129, size: 196628), avg_err: 0.0000")]
+    #[test_case(256 => "representation: HLL(estimate: 256, size: 196628), avg_err: 0.0000")]
+    #[test_case(512 => "representation: HLL(estimate: 511, size: 196628), avg_err: 0.0004")]
+    #[test_case(1024 => "representation: HLL(estimate: 1022, size: 196628), avg_err: 0.0014")]
+    #[test_case(4096 => "representation: HLL(estimate: 4100, size: 196628), avg_err: 0.0009")]
+    #[test_case(10_000 => "representation: HLL(estimate: 10007, size: 196628), avg_err: 0.0008")]
+    #[test_case(100_000 => "representation: HLL(estimate: 100240, size: 196628), avg_err: 0.0011")]
     fn test_estimator_p18_w6(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<18, 6>::new(), n)
     }
@@ -381,41 +300,45 @@ pub mod tests {
             standard_error * tolerance
         );
 
-        format!("estimator = {:?} avg_err = {:.4}", e, avg_relative_error)
+        format!(
+            "representation: {:?}, avg_err: {:.4}",
+            e.representation(),
+            avg_relative_error
+        )
     }
 
-    #[test_case(0, 0 => "{ representation: Small, estimate: 0, size: 8 }")]
-    #[test_case(0, 1 => "{ representation: Small, estimate: 1, size: 8 }")]
-    #[test_case(1, 0 => "{ representation: Small, estimate: 1, size: 8 }")]
-    #[test_case(1, 1 => "{ representation: Small, estimate: 2, size: 8 }")]
-    #[test_case(1, 2 => "{ representation: Array, estimate: 3, size: 24 }")]
-    #[test_case(2, 1 => "{ representation: Array, estimate: 3, size: 24 }")]
-    #[test_case(2, 2 => "{ representation: Array, estimate: 4, size: 24 }")]
-    #[test_case(2, 3 => "{ representation: Array, estimate: 5, size: 40 }")]
-    #[test_case(2, 4 => "{ representation: Array, estimate: 6, size: 40 }")]
-    #[test_case(4, 2 => "{ representation: Array, estimate: 6, size: 40 }")]
-    #[test_case(3, 2 => "{ representation: Array, estimate: 5, size: 40 }")]
-    #[test_case(3, 3 => "{ representation: Array, estimate: 6, size: 40 }")]
-    #[test_case(3, 4 => "{ representation: Array, estimate: 7, size: 40 }")]
-    #[test_case(4, 3 => "{ representation: Array, estimate: 7, size: 40 }")]
-    #[test_case(4, 4 => "{ representation: Array, estimate: 8, size: 40 }")]
-    #[test_case(4, 8 => "{ representation: Array, estimate: 12, size: 72 }")]
-    #[test_case(8, 4 => "{ representation: Array, estimate: 12, size: 72 }")]
-    #[test_case(4, 12 => "{ representation: Array, estimate: 16, size: 72 }")]
-    #[test_case(12, 4 => "{ representation: Array, estimate: 16, size: 72 }")]
-    #[test_case(1, 127 => "{ representation: Array, estimate: 128, size: 520 }")]
-    #[test_case(1, 128 => "{ representation: HLL, estimate: 126, size: 3092 }")]
-    #[test_case(127, 1 => "{ representation: Array, estimate: 128, size: 520 }")]
-    #[test_case(128, 1 => "{ representation: HLL, estimate: 130, size: 3092 }")]
-    #[test_case(128, 128 => "{ representation: HLL, estimate: 256, size: 3092 }")]
-    #[test_case(512, 512 => "{ representation: HLL, estimate: 991, size: 3092 }")]
-    #[test_case(10000, 0 => "{ representation: HLL, estimate: 10068, size: 3092 }")]
-    #[test_case(0, 10000 => "{ representation: HLL, estimate: 10035, size: 3092 }")]
-    #[test_case(4, 10000 => "{ representation: HLL, estimate: 10045, size: 3092 }")]
-    #[test_case(10000, 4 => "{ representation: HLL, estimate: 10070, size: 3092 }")]
-    #[test_case(17, 10000 => "{ representation: HLL, estimate: 10052, size: 3092 }")]
-    #[test_case(10000, 17 => "{ representation: HLL, estimate: 10084, size: 3092 }")]
-    #[test_case(10000, 10000 => "{ representation: HLL, estimate: 19743, size: 3092 }")]
+    #[test_case(0, 0 => "Small(estimate: 0, size: 8)")]
+    #[test_case(0, 1 => "Small(estimate: 1, size: 8)")]
+    #[test_case(1, 0 => "Small(estimate: 1, size: 8)")]
+    #[test_case(1, 1 => "Small(estimate: 2, size: 8)")]
+    #[test_case(1, 2 => "Array(estimate: 3, size: 24)")]
+    #[test_case(2, 1 => "Array(estimate: 3, size: 24)")]
+    #[test_case(2, 2 => "Array(estimate: 4, size: 24)")]
+    #[test_case(2, 3 => "Array(estimate: 5, size: 40)")]
+    #[test_case(2, 4 => "Array(estimate: 6, size: 40)")]
+    #[test_case(4, 2 => "Array(estimate: 6, size: 40)")]
+    #[test_case(3, 2 => "Array(estimate: 5, size: 40)")]
+    #[test_case(3, 3 => "Array(estimate: 6, size: 40)")]
+    #[test_case(3, 4 => "Array(estimate: 7, size: 40)")]
+    #[test_case(4, 3 => "Array(estimate: 7, size: 40)")]
+    #[test_case(4, 4 => "Array(estimate: 8, size: 40)")]
+    #[test_case(4, 8 => "Array(estimate: 12, size: 72)")]
+    #[test_case(8, 4 => "Array(estimate: 12, size: 72)")]
+    #[test_case(4, 12 => "Array(estimate: 16, size: 72)")]
+    #[test_case(12, 4 => "Array(estimate: 16, size: 72)")]
+    #[test_case(1, 127 => "Array(estimate: 128, size: 520)")]
+    #[test_case(1, 128 => "HLL(estimate: 126, size: 3092)")]
+    #[test_case(127, 1 => "Array(estimate: 128, size: 520)")]
+    #[test_case(128, 1 => "HLL(estimate: 130, size: 3092)")]
+    #[test_case(128, 128 => "HLL(estimate: 256, size: 3092)")]
+    #[test_case(512, 512 => "HLL(estimate: 991, size: 3092)")]
+    #[test_case(10000, 0 => "HLL(estimate: 10068, size: 3092)")]
+    #[test_case(0, 10000 => "HLL(estimate: 10035, size: 3092)")]
+    #[test_case(4, 10000 => "HLL(estimate: 10045, size: 3092)")]
+    #[test_case(10000, 4 => "HLL(estimate: 10070, size: 3092)")]
+    #[test_case(17, 10000 => "HLL(estimate: 10052, size: 3092)")]
+    #[test_case(10000, 17 => "HLL(estimate: 10084, size: 3092)")]
+    #[test_case(10000, 10000 => "HLL(estimate: 19743, size: 3092)")]
     fn test_merge(lhs_n: usize, rhs_n: usize) -> String {
         let mut lhs = CardinalityEstimator::<12, 6>::new();
         for i in 0..lhs_n {
@@ -429,7 +352,7 @@ pub mod tests {
 
         lhs.merge(&rhs);
 
-        format!("{:?}", lhs)
+        format!("{:?}", lhs.representation())
     }
 
     #[test]

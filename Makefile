@@ -1,4 +1,4 @@
-.PHONY: test bench fuzz fuzz-sanitize lint fmt clean build
+.PHONY: test test-allocations bench bench-extended fuzz fuzz-sanitize lint fmt clean build doc
 
 all: build
 
@@ -7,6 +7,9 @@ build:
 
 test:
 	cargo test --features with_serde
+
+test-allocations:
+	cargo test test_allocations -- --show-output
 
 bench:
 	cargo criterion --bench cardinality_estimator

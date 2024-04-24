@@ -33,8 +33,8 @@ Please refer to our [examples](examples) and [benchmarks](benches) in the reposi
 
 ## Low memory footprint
 The `cardinality-estimator` achieves low memory footprint by leveraging an efficient data storage format.
-The data is stored in three different representations - Small, Sparse, and Dense - depending on the cardinality range.
-For instance, for a cardinality of 0 to 2, only 8 bytes of memory are used.
+The data is stored in three different representations - `Small`, `Array`, and `HyperLogLog` - depending on the cardinality range.
+For instance, for a cardinality of 0 to 2, only 8 bytes of stack memory and 0 bytes of heap memory are used.
 
 ## Low latency
 The crate offers low latency by using auto-vectorization for slice operations via compiler hints to use SIMD instructions.
@@ -63,14 +63,44 @@ pip install -r requirements.txt
 jupyter lab
 ```
 
-We've benchmarked cardinality-estimator against several other crates in the ecosystem. Here are the results:
-
-| Crate                                                                           | Features | Insert latency diff (%) | Estimate latency diff (%) | Memory footprint diff (%) |
-|---------------------------------------------------------------------------------|----------|-------------------------|---------------------------|---------------------------|
-| [cardinality-estimator](https://crates.io/crates/cardinality-estimator)         |          |                         |                           |                           |
-| [hyperloglog](https://crates.io/crates/hyperloglog)                             |          |                         |                           |                           |
-| [hyperloglogplus](https://crates.io/crates/hyperloglogplus)                     |          |                         |                           |                           |
-| [amadeus-streaming](https://crates.io/crates/amadeus-streaming)                 |          |                         |                           |                           |
-| [probabilistic-collections](https://crates.io/crates/probabilistic-collections) |          |                         |                           |                           |
+We've benchmarked cardinality-estimator against several other crates in the ecosystem:
+* [hyperloglog](https://crates.io/crates/hyperloglog)
+* [hyperloglogplus](https://crates.io/crates/hyperloglogplus)
+* [amadeus-streaming](https://crates.io/crates/amadeus-streaming)
+* [probabilistic-collections](https://crates.io/crates/probabilistic-collections)
 
 We're continuously working to make `cardinality-estimator` the fastest, lightest, and most accurate tool for cardinality estimation in Rust.
+
+### Memory usage
+Table below compares memory usage of different cardinality estimators. The number in each cell represents `stack memory bytes / heap memory bytes / heap memory blocks` at each measured cardinality. 
+
+| cardinality | cardinality_estimator | hyperloglog   | hyperloglogplus    | probabilistic_collections | amadeus_streaming |
+|-------------|-----------------------|---------------|--------------------|---------------------------|-------------------|
+| 0           | 8 / 0 / 0             | 120 / 880 / 2 | 160 / 0 / 0        | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 1           | 8 / 0 / 0             | 120 / 512 / 1 | 160 / 36 / 1       | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 2           | 8 / 0 / 0             | 120 / 512 / 1 | 160 / 36 / 1       | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 4           | 8 / 16 / 1            | 120 / 512 / 1 | 160 / 92 / 2       | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 8           | 8 / 48 / 2            | 120 / 512 / 1 | 160 / 188 / 3      | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 16          | 8 / 112 / 3           | 120 / 512 / 1 | 160 / 364 / 4      | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 32          | 8 / 240 / 4           | 120 / 512 / 1 | 160 / 700 / 5      | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 64          | 8 / 496 / 5           | 120 / 512 / 1 | 160 / 1400 / 13    | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 128         | 8 / 1008 / 6          | 120 / 512 / 1 | 160 / 3261 / 23    | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 256         | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 10361 / 43   | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 512         | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 38295 / 83   | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 1024        | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 146816 / 163 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 2048        | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 4096        | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 8192        | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 16384       | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 32768       | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 65536       | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 131072      | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 262144      | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 524288      | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+| 1048576     | 8 / 4092 / 7          | 120 / 512 / 1 | 160 / 207711 / 194 | 128 / 512 / 1             | 48 / 4096 / 1     |
+
+### Insert performance
+// TODO: add table + chart
+
+### Estimate performance
+// TODO: add table + chart

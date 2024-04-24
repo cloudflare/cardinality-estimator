@@ -6,7 +6,7 @@
 
 `cardinality-estimator` is a Rust crate designed to estimate the number of distinct elements in a stream or dataset in an efficient manner.
 This library uses HyperLogLog++ with an optimized low memory footprint and high accuracy approach, suitable for large-scale data analysis tasks.
-We're using `cardinality-estimator` for large-scale machine learning, detailed in our blog post: ["Efficient Data Aggregation at Scale: Solving the Count-Distinct Problem with a New Cardinality Estimator"](http://blog.cloudflare.com/introducing-cardinality-estimator).
+We're using `cardinality-estimator` for large-scale machine learning, computing cardinality features across multiple dimensions of the request.
 
 ## Overview
 Our cardinality estimator is highly efficient in terms of memory usage, latency, and accuracy.
@@ -22,16 +22,9 @@ Then, import `cardinality-estimator` in your Rust program:
 ```rust
 use cardinality_estimator::CardinalityEstimator;
 
-let estimator = CardinalityEstimator::<12, 6>::new();
-estimator.insert_hash(123);
+let mut estimator = CardinalityEstimator::<12, 6>::new();
+estimator.insert("test");
 let estimate = estimator.estimate();
-
-println!("estimate = {}", estimate);
-
-// To merge two estimators
-let estimator2 = CardinalityEstimator::<12, 6>::new();
-estimator.merge(&estimator2);
-let estimate = estimator2.estimate();
 
 println!("estimate = {}", estimate);
 ```
@@ -60,7 +53,7 @@ cargo install cargo-criterion
 
 Then benchmarks with output format JSON to save results for further analysis:
 ```shell
-cargo criterion --bench cardinality_estimator --message-format json | tee benches/bench_results_$(date '+%Y%m%d_%H%M%S').json
+make bench-extended
 ```
 
 To generate benchmark results charts and tables install and launch Jupyter lab:
@@ -76,10 +69,8 @@ We've benchmarked cardinality-estimator against several other crates in the ecos
 |---------------------------------------------------------------------------------|----------|-------------------------|---------------------------|---------------------------|
 | [cardinality-estimator](https://crates.io/crates/cardinality-estimator)         |          |                         |                           |                           |
 | [hyperloglog](https://crates.io/crates/hyperloglog)                             |          |                         |                           |                           |
-| [hyperloglog-rs](https://crates.io/crates/hyperloglog-rs)                       |          |                         |                           |                           |
 | [hyperloglogplus](https://crates.io/crates/hyperloglogplus)                     |          |                         |                           |                           |
 | [amadeus-streaming](https://crates.io/crates/amadeus-streaming)                 |          |                         |                           |                           |
-| [streaming_algorithms](https://crates.io/crates/streaming_algorithms)           |          |                         |                           |                           |
 | [probabilistic-collections](https://crates.io/crates/probabilistic-collections) |          |                         |                           |                           |
 
 We're continuously working to make `cardinality-estimator` the fastest, lightest, and most accurate tool for cardinality estimation in Rust.

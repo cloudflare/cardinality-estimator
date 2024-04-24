@@ -1,6 +1,6 @@
 use std::hash::BuildHasherDefault;
 
-use cardinality_estimator::estimator::CardinalityEstimator;
+use cardinality_estimator::CardinalityEstimator;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use hyperloglogplus::{HyperLogLog, HyperLogLogPlus};
 use pprof::criterion::{Output, PProfProfiler};

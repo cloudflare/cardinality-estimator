@@ -8,3 +8,5 @@ mod representation;
 #[cfg(feature = "with_serde")]
 mod serde;
 mod small;
+
+pub use estimator::*;

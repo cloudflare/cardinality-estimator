@@ -9,7 +9,10 @@ test:
 	cargo test --features with_serde
 
 bench:
-	cargo bench
+	cargo criterion --bench cardinality_estimator
+
+bench-extended:
+	N=1048576 cargo criterion --bench cardinality_estimator --message-format json | tee benches/bench_results_$$(date '+%Y%m%d_%H%M%S').json
 
 fuzz:
 	cargo +nightly fuzz run fuzz_target_estimator -- -max_len=65536

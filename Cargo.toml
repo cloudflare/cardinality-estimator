@@ -17,8 +17,14 @@ serde = { version = "1.0.197", optional = true }
 wyhash = "0.5.0"
 
 [dev-dependencies]
-test-case = "3.3.1"
+amadeus-streaming = "0.4.3"
+criterion = { version = "0.5.0", features = ["html_reports"] }
+hyperloglog = "1.0.2"
+hyperloglogplus = "0.4.1"
+pprof = { version = "0.13.0", features = ["flamegraph", "criterion", "protobuf-codec"] }
+probabilistic-collections = "0.7.0"
 serde_json = "1.0.115"
+test-case = "3.3.1"
 
 [[bench]]
 name = "cardinality_estimator"

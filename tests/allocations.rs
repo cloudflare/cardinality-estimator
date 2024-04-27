@@ -82,6 +82,13 @@ fn test_allocations() {
 
     let table_config = Settings::default().with(Style::markdown());
     let markdown = Table::new(results).with(table_config).to_string();
-    std::fs::write(format!("{}/target/memory_allocations.md", env!("CARGO_MANIFEST_DIR")), &markdown).unwrap();
+    std::fs::write(
+        format!(
+            "{}/target/memory_allocations.md",
+            env!("CARGO_MANIFEST_DIR")
+        ),
+        &markdown,
+    )
+    .unwrap();
     println!("{}", markdown);
 }

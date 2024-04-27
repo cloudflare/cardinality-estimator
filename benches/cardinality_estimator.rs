@@ -40,11 +40,38 @@ fn insert_benchmark(c: &mut Criterion) {
         );
 
         group.bench_with_input(
+            BenchmarkId::new("amadeus-streaming", cardinality),
+            &cardinality,
+            |b, &cardinality| {
+                b.iter(|| {
+                    let mut estimator = amadeus_streaming::HyperLogLog::new(0.01625);
+                    for i in 0..black_box(cardinality) {
+                        estimator.push(black_box(&i));
+                    }
+                });
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("probabilistic-collections", cardinality),
+            &cardinality,
+            |b, &cardinality| {
+                b.iter(|| {
+                    let mut estimator =
+                        probabilistic_collections::hyperloglog::HyperLogLog::<usize>::new(0.004);
+                    for i in 0..black_box(cardinality) {
+                        estimator.insert(black_box(&i));
+                    }
+                });
+            },
+        );
+
+        group.bench_with_input(
             BenchmarkId::new("hyperloglog", cardinality),
             &cardinality,
             |b, &cardinality| {
                 b.iter(|| {
-                    let mut estimator = hyperloglog::HyperLogLog::new(0.01625);
+                    let mut estimator = hyperloglog::HyperLogLog::new(0.004);
                     for i in 0..black_box(cardinality) {
                         estimator.insert(black_box(&i));
                     }
@@ -61,33 +88,6 @@ fn insert_benchmark(c: &mut Criterion) {
                         HyperLogLogPlus::new(12, BuildHasherDefault::<WyHash>::default()).unwrap();
                     for i in 0..black_box(cardinality) {
                         estimator.insert(black_box(&i));
-                    }
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("probabilistic-collections", cardinality),
-            &cardinality,
-            |b, &cardinality| {
-                b.iter(|| {
-                    let mut estimator =
-                        probabilistic_collections::hyperloglog::HyperLogLog::<usize>::new(0.01625);
-                    for i in 0..black_box(cardinality) {
-                        estimator.insert(black_box(&i));
-                    }
-                });
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("amadeus-streaming", cardinality),
-            &cardinality,
-            |b, &cardinality| {
-                b.iter(|| {
-                    let mut estimator = amadeus_streaming::HyperLogLog::new(0.01625);
-                    for i in 0..black_box(cardinality) {
-                        estimator.push(black_box(&i));
                     }
                 });
             },
@@ -123,10 +123,35 @@ fn estimate_benchmark(c: &mut Criterion) {
         );
 
         group.bench_with_input(
+            BenchmarkId::new("amadeus-streaming", cardinality),
+            &cardinality,
+            |b, &cardinality| {
+                let mut estimator = amadeus_streaming::HyperLogLog::new(0.01625);
+                for i in 0..black_box(cardinality) {
+                    estimator.push(black_box(&i));
+                }
+                b.iter(|| estimator.len());
+            },
+        );
+
+        group.bench_with_input(
+            BenchmarkId::new("probabilistic-collections", cardinality),
+            &cardinality,
+            |b, &cardinality| {
+                let mut estimator =
+                    probabilistic_collections::hyperloglog::HyperLogLog::<usize>::new(0.004);
+                for i in 0..black_box(cardinality) {
+                    estimator.insert(black_box(&i));
+                }
+                b.iter(|| estimator.len());
+            },
+        );
+
+        group.bench_with_input(
             BenchmarkId::new("hyperloglog", cardinality),
             &cardinality,
             |b, &cardinality| {
-                let mut estimator = hyperloglog::HyperLogLog::new(0.01625);
+                let mut estimator = hyperloglog::HyperLogLog::new(0.004);
                 for i in 0..black_box(cardinality) {
                     estimator.insert(black_box(&i));
                 }
@@ -144,31 +169,6 @@ fn estimate_benchmark(c: &mut Criterion) {
                     estimator.insert(black_box(&i));
                 }
                 b.iter(|| estimator.count());
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("probabilistic-collections", cardinality),
-            &cardinality,
-            |b, &cardinality| {
-                let mut estimator =
-                    probabilistic_collections::hyperloglog::HyperLogLog::<usize>::new(0.01625);
-                for i in 0..black_box(cardinality) {
-                    estimator.insert(black_box(&i));
-                }
-                b.iter(|| estimator.len());
-            },
-        );
-
-        group.bench_with_input(
-            BenchmarkId::new("amadeus-streaming", cardinality),
-            &cardinality,
-            |b, &cardinality| {
-                let mut estimator = amadeus_streaming::HyperLogLog::new(0.01625);
-                for i in 0..black_box(cardinality) {
-                    estimator.push(black_box(&i));
-                }
-                b.iter(|| estimator.len());
             },
         );
 

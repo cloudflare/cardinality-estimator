@@ -14,10 +14,10 @@ use wyhash::WyHash;
 struct Record {
     cardinality: usize,
     cardinality_estimator: String,
+    amadeus_streaming: String,
+    probabilistic_collections: String,
     hyperloglog: String,
     hyperloglogplus: String,
-    probabilistic_collections: String,
-    amadeus_streaming: String,
 }
 
 fn measure_memory_usage<T>(
@@ -54,9 +54,19 @@ fn test_allocations() {
                 || CardinalityEstimator::<12, 6>::new(),
                 |est, i| est.insert(i),
             ),
+            amadeus_streaming: measure_memory_usage(
+                cardinality,
+                || amadeus_streaming::HyperLogLog::new(0.01625),
+                |est, i| est.push(i),
+            ),
+            probabilistic_collections: measure_memory_usage(
+                cardinality,
+                || probabilistic_collections::hyperloglog::HyperLogLog::<usize>::new(0.004),
+                |est, i| est.insert(i),
+            ),
             hyperloglog: measure_memory_usage(
                 cardinality,
-                || hyperloglog::HyperLogLog::new(0.01625),
+                || hyperloglog::HyperLogLog::new(0.004),
                 |est, i| est.insert(i),
             ),
             hyperloglogplus: measure_memory_usage(
@@ -67,19 +77,11 @@ fn test_allocations() {
                 },
                 |est, i| est.insert(i),
             ),
-            probabilistic_collections: measure_memory_usage(
-                cardinality,
-                || probabilistic_collections::hyperloglog::HyperLogLog::<usize>::new(0.01625),
-                |est, i| est.insert(i),
-            ),
-            amadeus_streaming: measure_memory_usage(
-                cardinality,
-                || amadeus_streaming::HyperLogLog::new(0.01625),
-                |est, i| est.push(i),
-            ),
         })
         .collect();
 
     let table_config = Settings::default().with(Style::markdown());
-    println!("{}", Table::new(results).with(table_config).to_string());
+    let markdown = Table::new(results).with(table_config).to_string();
+    std::fs::write(format!("{}/target/memory_allocations.md", env!("CARGO_MANIFEST_DIR")), &markdown).unwrap();
+    println!("{}", markdown);
 }

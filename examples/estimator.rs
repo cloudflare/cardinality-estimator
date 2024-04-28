@@ -1,13 +1,13 @@
-use cardinality_estimator::CardinalityEstimator;
+use cardinality_estimator::{CardinalityEstimator, CardinalityEstimatorTrait};
 
 fn main() {
-    let mut estimator1 = CardinalityEstimator::<12, 6>::new();
+    let mut estimator1 = CardinalityEstimator::<usize>::new();
     for i in 0..10 {
         estimator1.insert(&i);
     }
     println!("estimator1 estimate = {}", estimator1.estimate());
 
-    let mut estimator2 = CardinalityEstimator::<12, 6>::new();
+    let mut estimator2 = CardinalityEstimator::<usize>::new();
     for i in 10..15 {
         estimator2.insert(&i);
     }

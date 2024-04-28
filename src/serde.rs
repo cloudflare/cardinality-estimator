@@ -16,17 +16,22 @@
 //! Refer to the serde documentation for more details on custom serialization and deserialization:
 //! - [Serialization](https://serde.rs/impl-serialize.html)
 //! - [Deserialization](https://serde.rs/impl-deserialize.html)
+use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Serialize};
 
 use crate::array::Array;
-use crate::estimator::CardinalityEstimator;
+use crate::estimator::{CardinalityEstimator, CardinalityEstimatorTrait};
 use crate::hyperloglog::HyperLogLog;
 use crate::representation::{Representation, RepresentationTrait};
 
-impl<const P: usize, const W: usize> Serialize for CardinalityEstimator<P, W> {
+impl<T, H, const P: usize, const W: usize> Serialize for CardinalityEstimator<T, H, P, W>
+where
+    T: Hash + ?Sized,
+    H: Hasher + Default,
+{
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -57,7 +62,12 @@ impl<const P: usize, const W: usize> Serialize for CardinalityEstimator<P, W> {
     }
 }
 
-impl<'de, const P: usize, const W: usize> Deserialize<'de> for CardinalityEstimator<P, W> {
+impl<'de, T, H, const P: usize, const W: usize> Deserialize<'de>
+    for CardinalityEstimator<T, H, P, W>
+where
+    T: Hash + ?Sized,
+    H: Hasher + Default,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -68,7 +78,7 @@ impl<'de, const P: usize, const W: usize> Deserialize<'de> for CardinalityEstima
         let (data, opt_vec): (usize, Option<Vec<u32>>) = Deserialize::deserialize(deserializer)?;
 
         // Initialize a new estimator.
-        let mut estimator = CardinalityEstimator::<P, W>::new();
+        let mut estimator = CardinalityEstimator::<T, H, P, W>::new();
 
         estimator.data = match opt_vec {
             // estimator is not small, and we need to replace its data with the deserialized array.
@@ -99,10 +109,10 @@ pub mod tests {
     #[test_case(100; "hundred distinct elements")]
     #[test_case(10000; "ten thousand distinct elements")]
     fn test_serde(n: usize) {
-        let mut original_estimator = CardinalityEstimator::<12, 6>::new();
+        let mut original_estimator = CardinalityEstimator::<str>::new();
 
         for i in 0..n {
-            let item = format!("item{}", i);
+            let item = &format!("item{}", i);
             original_estimator.insert(&item);
         }
 
@@ -112,7 +122,7 @@ pub mod tests {
             "serialized string should not be empty"
         );
 
-        let deserialized_estimator: CardinalityEstimator<12, 6> =
+        let deserialized_estimator: CardinalityEstimator<str> =
             serde_json::from_str(&serialized).expect("deserialization failed");
 
         assert_eq!(
@@ -124,7 +134,7 @@ pub mod tests {
     #[test]
     fn test_deserialize_invalid_json() {
         let invalid_json = "{ invalid_json_string }";
-        let result: Result<CardinalityEstimator<12, 6>, _> = serde_json::from_str(invalid_json);
+        let result: Result<CardinalityEstimator<str>, _> = serde_json::from_str(invalid_json);
 
         assert!(
             result.is_err(),

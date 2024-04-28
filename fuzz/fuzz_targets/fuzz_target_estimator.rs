@@ -1,6 +1,6 @@
 #![no_main]
 
-use cardinality_estimator::estimator::CardinalityEstimator;
+use cardinality_estimator::estimator::{CardinalityEstimator, CardinalityEstimatorTrait};
 use libfuzzer_sys::fuzz_target;
 use wyhash::wyhash;
 
@@ -12,7 +12,7 @@ fuzz_target!(|data: &[u8]| {
     let split_index = wyhash(data, 0) as usize % data.len();
     let (first_half, second_half) = data.split_at(split_index);
 
-    let mut estimator1 = CardinalityEstimator::<12, 6>::new();
+    let mut estimator1 = CardinalityEstimator::<&[u8]>::new();
     for chunk in first_half.chunks(4) {
         estimator1.insert(&chunk);
         assert!(estimator1.estimate() > 0);
@@ -20,7 +20,7 @@ fuzz_target!(|data: &[u8]| {
 
     }
 
-    let mut estimator2 = CardinalityEstimator::<12, 6>::new();
+    let mut estimator2 = CardinalityEstimator::<&[u8]>::new();
     for chunk in second_half.chunks(4) {
         estimator2.insert(&chunk);
         assert!(estimator2.estimate() > 0);

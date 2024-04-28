@@ -1,24 +1,24 @@
-import sys
+import os
 import chdb
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-def analyze(bench_results):
+def analyze(bench_results_path):
     df = chdb.query(f"""
     SELECT 
         toUInt64(extract(id, '/.*/(\d+)')) as cardinality,
         extract(id, '/(.*)/') as estimator,
         round(mean.estimate / if(cardinality = 0, 1, cardinality), 2) as time
     FROM
-        '{bench_results}'
+        '{bench_results_path}/results.json'
     WHERE 
         match(id, 'insert')
     ORDER BY
         cardinality
-    """, 'DataFrame');
-    render_comparison(df, 'insert', 'time', 'linear')
+    """, 'DataFrame')
+    render_comparison(bench_results_path, df, 'insert', 'time', 'linear')
 
     df = chdb.query(f"""
     SELECT 
@@ -26,24 +26,29 @@ def analyze(bench_results):
         extract(id, '/(.*)/') as estimator,
         round(mean.estimate, 2) as time
     FROM
-        '{bench_results}'
+        '{bench_results_path}/results.json'
     WHERE 
         match(id, 'estimate')
     ORDER BY
         cardinality
-    """, 'DataFrame');
+    """, 'DataFrame')
 
-    render_comparison(df, 'estimate', 'time', 'log')
+    render_comparison(bench_results_path, df, 'estimate', 'time', 'log')
 
-    df = pd.read_table('target/memory_allocations.md', delimiter='|', comment='-', skipinitialspace=True)
+    df = pd.read_table(f'{bench_results_path}/memory_usage.md', delimiter='|', comment='-', skipinitialspace=True)
     df = df.dropna(axis=1, how='all').rename(columns=lambda x: x.strip().replace('_', '-')).dropna()
     for column in df.columns[1:]:
         df[column] = df[column].apply(lambda x: sum(int(num) for num in x.split('/')[:2]))
     df_memory = df.melt(id_vars='cardinality', var_name='estimator', value_name='bytes')
-    render_comparison(df_memory, 'memory', 'bytes', 'log')
+    render_comparison(bench_results_path, df_memory, 'memory', 'bytes', 'log')
+
+    df = pd.read_table(f'{bench_results_path}/relative_error.md', delimiter='|', comment='-', skipinitialspace=True)
+    df = df.dropna(axis=1, how='all').rename(columns=lambda x: x.strip().replace('_', '-')).dropna()
+    df_error = df.melt(id_vars='cardinality', var_name='estimator', value_name='rate')
+    render_comparison(bench_results_path, df_error, 'error', 'rate', 'linear', (0, 0.2))
 
 
-def render_comparison(df, operation, metric, yscale):
+def render_comparison(bench_results_path, df, operation, metric, yscale, ylim=None):
     pivot_df = df.pivot(index='cardinality', columns='estimator', values=metric)
 
     desired_order = ['cardinality-estimator', 'amadeus-streaming']
@@ -51,7 +56,7 @@ def render_comparison(df, operation, metric, yscale):
     final_column_order = desired_order + rest_of_columns
     pivot_df = pivot_df[final_column_order]
 
-    md_path = f'target/{operation}_{metric}.md'
+    md_path = f'{bench_results_path}/{operation}_{metric}.md'
     pivot_df.apply(highlight_min, axis=1).to_markdown(md_path, tablefmt='github')
     print(f"saved markdown table to {md_path}")
 
@@ -76,6 +81,8 @@ def render_comparison(df, operation, metric, yscale):
 
     plt.xscale('log', base=2)
     plt.yscale(yscale)
+    if ylim:
+        plt.ylim(ylim)
 
     x_ticks_estimate = df['cardinality'].unique()
     selected_x_ticks_estimate = [x for x in x_ticks_estimate if x > 0]
@@ -86,7 +93,7 @@ def render_comparison(df, operation, metric, yscale):
     plt.xlabel('Cardinality')
     plt.ylabel(metric)
 
-    plot_path = f'target/{operation}_{metric}.png'
+    plot_path = f'{bench_results_path}/{operation}_{metric}.png'
     plt.savefig(plot_path)
     print(f"saved plot to {plot_path}")
 
@@ -98,4 +105,4 @@ def highlight_min(row):
 
 
 if __name__ == '__main__':
-    analyze(sys.argv[1])
+    analyze(os.environ["BENCH_RESULTS_PATH"])

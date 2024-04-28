@@ -24,6 +24,7 @@ hyperloglog = "1.0.2"
 hyperloglogplus = "0.4.1"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion", "protobuf-codec"] }
 probabilistic-collections = "0.7.0"
+rand = "0.8.5"
 serde_json = "1.0.115"
 tabled = "0.15.0"
 test-case = "3.3.1"

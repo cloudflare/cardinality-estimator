@@ -14,11 +14,13 @@ test-allocations:
 bench:
 	cargo criterion --bench cardinality_estimator
 
-BENCH_RESULTS_PATH := target/bench_results_$(shell date '+%Y%m%d_%H%M%S').json
-
+bench-extended: export RUSTFLAGS = -C target-cpu=native
+bench-extended: export N = 1048576
+bench-extended: export BENCH_RESULTS_PATH = target/bench_results/$(shell date '+%Y%m%d_%H%M%S')
 bench-extended:
-	RUSTFLAGS="-C target-cpu=native" N=1048576 cargo criterion --bench cardinality_estimator --message-format json | tee $(FILENAME)
-	python3 benches/analyze.py $(FILENAME)
+	mkdir -p $(BENCH_RESULTS_PATH)
+	cargo criterion --bench cardinality_estimator --message-format json | tee $(BENCH_RESULTS_PATH)/results.json
+	python3 benches/analyze.py
 
 fuzz:
 	cargo +nightly fuzz run fuzz_target_estimator -- -max_len=65536

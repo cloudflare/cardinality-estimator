@@ -54,9 +54,7 @@ where
     /// Insert a hashable item into `CardinalityEstimator`
     #[inline]
     fn insert(&mut self, item: &T) {
-        let mut hasher = self.build_hasher.build_hasher();
-        item.hash(&mut hasher);
-        let hash = hasher.finish();
+        let hash = self.build_hasher.hash_one(&item);
         self.insert_hash(hash);
     }
 

@@ -94,7 +94,7 @@ where
             // Start with empty small representation
             data: 0,
             build_hasher: BuildHasherDefault::default(),
-            _phantom_data: PhantomData::default(),
+            _phantom_data: PhantomData,
         }
     }
 
@@ -129,7 +129,7 @@ where
                     self.insert_encoded_hash(h);
                 }
             }
-            (Representation::Small(lhs_small), Representation::HLL(rhs_hll)) => {
+            (Representation::Small(lhs_small), Representation::Hll(rhs_hll)) => {
                 let mut hll = rhs_hll.clone();
                 for h in lhs_small.items() {
                     if h != 0 {
@@ -138,7 +138,7 @@ where
                 }
                 self.data = hll.to_data();
             }
-            (Representation::Array(mut lhs_arr), Representation::HLL(rhs_hll)) => {
+            (Representation::Array(mut lhs_arr), Representation::Hll(rhs_hll)) => {
                 let mut hll = rhs_hll.clone();
                 for &h in lhs_arr.deref() {
                     hll.insert_encoded_hash(h);
@@ -146,7 +146,7 @@ where
                 lhs_arr.drop();
                 self.data = hll.to_data();
             }
-            (Representation::HLL(mut lhs_hll), Representation::HLL(rhs_hll)) => {
+            (Representation::Hll(mut lhs_hll), Representation::Hll(rhs_hll)) => {
                 lhs_hll.merge(&rhs_hll);
             }
         }
@@ -261,12 +261,12 @@ pub mod tests {
     #[test_case(56 => "representation: Array(estimate: 56, size: 264), avg_err: 0.0000")]
     #[test_case(57 => "representation: Array(estimate: 57, size: 264), avg_err: 0.0000")]
     #[test_case(128 => "representation: Array(estimate: 128, size: 520), avg_err: 0.0000")]
-    #[test_case(129 => "representation: HLL(estimate: 131, size: 660), avg_err: 0.0001")]
-    #[test_case(256 => "representation: HLL(estimate: 264, size: 660), avg_err: 0.0119")]
-    #[test_case(512 => "representation: HLL(estimate: 512, size: 660), avg_err: 0.0151")]
-    #[test_case(1024 => "representation: HLL(estimate: 1033, size: 660), avg_err: 0.0172")]
-    #[test_case(10_000 => "representation: HLL(estimate: 10417, size: 660), avg_err: 0.0281")]
-    #[test_case(100_000 => "representation: HLL(estimate: 93099, size: 660), avg_err: 0.0351")]
+    #[test_case(129 => "representation: Hll(estimate: 131, size: 660), avg_err: 0.0001")]
+    #[test_case(256 => "representation: Hll(estimate: 264, size: 660), avg_err: 0.0119")]
+    #[test_case(512 => "representation: Hll(estimate: 512, size: 660), avg_err: 0.0151")]
+    #[test_case(1024 => "representation: Hll(estimate: 1033, size: 660), avg_err: 0.0172")]
+    #[test_case(10_000 => "representation: Hll(estimate: 10417, size: 660), avg_err: 0.0281")]
+    #[test_case(100_000 => "representation: Hll(estimate: 93099, size: 660), avg_err: 0.0351")]
     fn test_estimator_p10_w5(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<usize, WyHash, 10, 5>::new(), n)
     }
@@ -281,13 +281,13 @@ pub mod tests {
     #[test_case(32 => "representation: Array(estimate: 32, size: 136), avg_err: 0.0000")]
     #[test_case(64 => "representation: Array(estimate: 64, size: 264), avg_err: 0.0000")]
     #[test_case(128 => "representation: Array(estimate: 128, size: 520), avg_err: 0.0000")]
-    #[test_case(129 => "representation: HLL(estimate: 130, size: 3092), avg_err: 0.0001")]
-    #[test_case(256 => "representation: HLL(estimate: 254, size: 3092), avg_err: 0.0029")]
-    #[test_case(512 => "representation: HLL(estimate: 498, size: 3092), avg_err: 0.0068")]
-    #[test_case(1024 => "representation: HLL(estimate: 1012, size: 3092), avg_err: 0.0130")]
-    #[test_case(4096 => "representation: HLL(estimate: 4105, size: 3092), avg_err: 0.0089")]
-    #[test_case(10_000 => "representation: HLL(estimate: 10068, size: 3092), avg_err: 0.0087")]
-    #[test_case(100_000 => "representation: HLL(estimate: 95628, size: 3092), avg_err: 0.0182")]
+    #[test_case(129 => "representation: Hll(estimate: 130, size: 3092), avg_err: 0.0001")]
+    #[test_case(256 => "representation: Hll(estimate: 254, size: 3092), avg_err: 0.0029")]
+    #[test_case(512 => "representation: Hll(estimate: 498, size: 3092), avg_err: 0.0068")]
+    #[test_case(1024 => "representation: Hll(estimate: 1012, size: 3092), avg_err: 0.0130")]
+    #[test_case(4096 => "representation: Hll(estimate: 4105, size: 3092), avg_err: 0.0089")]
+    #[test_case(10_000 => "representation: Hll(estimate: 10068, size: 3092), avg_err: 0.0087")]
+    #[test_case(100_000 => "representation: Hll(estimate: 95628, size: 3092), avg_err: 0.0182")]
     fn test_estimator_p12_w6(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<usize, WyHash, 12, 6>::new(), n)
     }
@@ -302,13 +302,13 @@ pub mod tests {
     #[test_case(32 => "representation: Array(estimate: 32, size: 136), avg_err: 0.0000")]
     #[test_case(64 => "representation: Array(estimate: 64, size: 264), avg_err: 0.0000")]
     #[test_case(128 => "representation: Array(estimate: 128, size: 520), avg_err: 0.0000")]
-    #[test_case(129 => "representation: HLL(estimate: 129, size: 196628), avg_err: 0.0000")]
-    #[test_case(256 => "representation: HLL(estimate: 256, size: 196628), avg_err: 0.0000")]
-    #[test_case(512 => "representation: HLL(estimate: 511, size: 196628), avg_err: 0.0004")]
-    #[test_case(1024 => "representation: HLL(estimate: 1022, size: 196628), avg_err: 0.0014")]
-    #[test_case(4096 => "representation: HLL(estimate: 4100, size: 196628), avg_err: 0.0009")]
-    #[test_case(10_000 => "representation: HLL(estimate: 10007, size: 196628), avg_err: 0.0008")]
-    #[test_case(100_000 => "representation: HLL(estimate: 100240, size: 196628), avg_err: 0.0011")]
+    #[test_case(129 => "representation: Hll(estimate: 129, size: 196628), avg_err: 0.0000")]
+    #[test_case(256 => "representation: Hll(estimate: 256, size: 196628), avg_err: 0.0000")]
+    #[test_case(512 => "representation: Hll(estimate: 511, size: 196628), avg_err: 0.0004")]
+    #[test_case(1024 => "representation: Hll(estimate: 1022, size: 196628), avg_err: 0.0014")]
+    #[test_case(4096 => "representation: Hll(estimate: 4100, size: 196628), avg_err: 0.0009")]
+    #[test_case(10_000 => "representation: Hll(estimate: 10007, size: 196628), avg_err: 0.0008")]
+    #[test_case(100_000 => "representation: Hll(estimate: 100240, size: 196628), avg_err: 0.0011")]
     fn test_estimator_p18_w6(n: usize) -> String {
         evaluate_cardinality_estimator(CardinalityEstimator::<usize, WyHash, 18, 6>::new(), n)
     }
@@ -367,18 +367,18 @@ pub mod tests {
     #[test_case(4, 12 => "Array(estimate: 16, size: 72)")]
     #[test_case(12, 4 => "Array(estimate: 16, size: 72)")]
     #[test_case(1, 127 => "Array(estimate: 128, size: 520)")]
-    #[test_case(1, 128 => "HLL(estimate: 130, size: 3092)")]
+    #[test_case(1, 128 => "Hll(estimate: 130, size: 3092)")]
     #[test_case(127, 1 => "Array(estimate: 128, size: 520)")]
-    #[test_case(128, 1 => "HLL(estimate: 130, size: 3092)")]
-    #[test_case(128, 128 => "HLL(estimate: 254, size: 3092)")]
-    #[test_case(512, 512 => "HLL(estimate: 1012, size: 3092)")]
-    #[test_case(10000, 0 => "HLL(estimate: 10068, size: 3092)")]
-    #[test_case(0, 10000 => "HLL(estimate: 10068, size: 3092)")]
-    #[test_case(4, 10000 => "HLL(estimate: 10068, size: 3092)")]
-    #[test_case(10000, 4 => "HLL(estimate: 10068, size: 3092)")]
-    #[test_case(17, 10000 => "HLL(estimate: 10073, size: 3092)")]
-    #[test_case(10000, 17 => "HLL(estimate: 10073, size: 3092)")]
-    #[test_case(10000, 10000 => "HLL(estimate: 19974, size: 3092)")]
+    #[test_case(128, 1 => "Hll(estimate: 130, size: 3092)")]
+    #[test_case(128, 128 => "Hll(estimate: 254, size: 3092)")]
+    #[test_case(512, 512 => "Hll(estimate: 1012, size: 3092)")]
+    #[test_case(10000, 0 => "Hll(estimate: 10068, size: 3092)")]
+    #[test_case(0, 10000 => "Hll(estimate: 10068, size: 3092)")]
+    #[test_case(4, 10000 => "Hll(estimate: 10068, size: 3092)")]
+    #[test_case(10000, 4 => "Hll(estimate: 10068, size: 3092)")]
+    #[test_case(17, 10000 => "Hll(estimate: 10073, size: 3092)")]
+    #[test_case(10000, 17 => "Hll(estimate: 10073, size: 3092)")]
+    #[test_case(10000, 10000 => "Hll(estimate: 19974, size: 3092)")]
     fn test_merge(lhs_n: usize, rhs_n: usize) -> String {
         let mut lhs = CardinalityEstimator::<usize, WyHash, 12, 6>::new();
         for i in 0..lhs_n {

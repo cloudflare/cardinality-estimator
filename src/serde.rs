@@ -51,7 +51,7 @@ where
                 // If the estimator is slice, the second element is a option containing slice data.
                 tup.serialize_element(&Some(arr.deref()))?;
             }
-            Representation::HLL(hll) => {
+            Representation::Hll(hll) => {
                 // If the estimator is HLL, the second element is a option containing HLL data.
                 tup.serialize_element(&Some(hll.data))?;
             }

@@ -14,7 +14,7 @@ const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
 pub(crate) enum Representation<'a, const P: usize, const W: usize> {
     Small(Small<P, W>),
     Array(Array<'a, P, W>),
-    HLL(HyperLogLog<'a, P, W>),
+    Hll(HyperLogLog<'a, P, W>),
 }
 
 /// Representation trait which must be implemented by all representations.
@@ -47,7 +47,7 @@ impl<'a, const P: usize, const W: usize> Representation<'a, P, W> {
         match data & REPRESENTATION_MASK {
             0 => Representation::Small(Small::from(data)),
             1 => Representation::Array(Array::from(data)),
-            3 => Representation::HLL(HyperLogLog::<P, W>::from(data)),
+            3 => Representation::Hll(HyperLogLog::<P, W>::from(data)),
             _ => Representation::Small(Small::from(0)),
         }
     }

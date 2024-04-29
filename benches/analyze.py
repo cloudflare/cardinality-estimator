@@ -45,16 +45,12 @@ def analyze(bench_results_path):
     df = pd.read_table(f'{bench_results_path}/relative_error.md', delimiter='|', comment='-', skipinitialspace=True)
     df = df.dropna(axis=1, how='all').rename(columns=lambda x: x.strip().replace('_', '-')).dropna()
     df_error = df.melt(id_vars='cardinality', var_name='estimator', value_name='rate')
-    render_comparison(bench_results_path, df_error, 'error', 'rate', 'linear', (0, 0.2))
+    render_comparison(bench_results_path, df_error, 'error', 'rate', 'linear', (0.0, 0.05))
 
 
 def render_comparison(bench_results_path, df, operation, metric, yscale, ylim=None):
     pivot_df = df.pivot(index='cardinality', columns='estimator', values=metric)
-
-    desired_order = ['cardinality-estimator', 'amadeus-streaming']
-    rest_of_columns = [col for col in pivot_df.columns if col not in desired_order]
-    final_column_order = desired_order + rest_of_columns
-    pivot_df = pivot_df[final_column_order]
+    pivot_df = pivot_df[df["estimator"].unique()]
 
     md_path = f'{bench_results_path}/{operation}_{metric}.md'
     pivot_df.apply(highlight_min, axis=1).to_markdown(md_path, tablefmt='github')

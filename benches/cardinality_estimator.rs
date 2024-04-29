@@ -154,9 +154,9 @@ fn measure_allocations<E: CardinalityEstimatorTrait<usize>>(cardinality: usize) 
 fn measure_error<E: CardinalityEstimatorTrait<usize>>(cardinality: usize) -> String {
     let n = 100;
     let mut total_relative_error: f64 = 0.0;
+    let mut rng = StdRng::seed_from_u64(12345);
     for _ in 0..n {
         let mut estimator = E::new();
-        let mut rng = StdRng::seed_from_u64(12345);
         for _ in 0..cardinality {
             estimator.insert(&rng.gen());
         }

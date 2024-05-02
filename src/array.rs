@@ -19,7 +19,7 @@ use crate::hyperloglog::HyperLogLog;
 use crate::representation::RepresentationTrait;
 
 /// Maximum number of elements stored in array representation
-const MAX_CAPACITY: usize = 128;
+pub(crate) const MAX_CAPACITY: usize = 128;
 /// Bit offset of the array's length
 const LEN_OFFSET: usize = 56;
 /// Mask used for accessing heap allocated data stored at the pointer in `data` field.

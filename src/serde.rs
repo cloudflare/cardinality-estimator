@@ -23,10 +23,8 @@ use serde::de::Error;
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Serialize};
 
-use crate::array::Array;
-use crate::estimator::{CardinalityEstimator, CardinalityEstimatorTrait};
-use crate::hyperloglog::HyperLogLog;
-use crate::representation::{Representation, RepresentationTrait, REPRESENTATION_MASK};
+use crate::estimator::CardinalityEstimator;
+use crate::representation::Representation;
 
 impl<T, H, const P: usize, const W: usize> Serialize for CardinalityEstimator<T, H, P, W>
 where
@@ -77,42 +75,14 @@ where
         // of the tuple is the data field of the estimator, and the second element is an Option
         // that contains the array data if the estimator is not small.
         let (data, opt_vec): (usize, Option<Vec<u32>>) = Deserialize::deserialize(deserializer)?;
-
-        // Initialize a new estimator.
-        let mut estimator = CardinalityEstimator::<T, H, P, W>::new();
-
-        estimator.data = match opt_vec {
-            // estimator is not small, and we need to replace its data with the deserialized array.
-            Some(vec) => {
-                if vec.len() <= 2 {
-                    return Err(Error::custom(format!("invalid length of vec {:?}", &vec)));
-                } else if vec.len() == HyperLogLog::<P, W>::HLL_SLICE_LEN {
-                    HyperLogLog::<P, W>::from(vec).to_data()
-                } else {
-                    let slice_len = vec.len();
-                    Array::<P, W>::from_vec(vec, slice_len).to_data()
-                }
-            }
-            // estimator is small, and we can just set its data field to the deserialized value.
-            None => {
-                if data & REPRESENTATION_MASK == 0 {
-                    data
-                } else {
-                    return Err(Error::custom(format!(
-                        "invalid data for small representation {}",
-                        data
-                    )));
-                }
-            }
-        };
-
-        Ok(estimator)
+        Representation::try_from(data, opt_vec).map_err(|e| Error::custom(format!("{:?}", e)))
     }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::estimator::CardinalityEstimatorTrait;
     use test_case::test_case;
 
     #[test_case(0; "empty set")]

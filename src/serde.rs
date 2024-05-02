@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use crate::array::Array;
 use crate::estimator::{CardinalityEstimator, CardinalityEstimatorTrait};
 use crate::hyperloglog::HyperLogLog;
-use crate::representation::{Representation, REPRESENTATION_MASK, RepresentationTrait};
+use crate::representation::{Representation, RepresentationTrait, REPRESENTATION_MASK};
 
 impl<T, H, const P: usize, const W: usize> Serialize for CardinalityEstimator<T, H, P, W>
 where

@@ -26,7 +26,7 @@ fuzz-serde:
 	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run serde -- -max_len=65536
 
 lint:
-	cargo clippy -- -D warnings
+	cargo clippy --features with_serde -- -D warnings
 
 fmt:
 	cargo fmt --all

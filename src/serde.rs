@@ -19,13 +19,14 @@
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
+use serde::de::Error;
 use serde::ser::SerializeTuple;
 use serde::{Deserialize, Serialize};
 
 use crate::array::Array;
 use crate::estimator::{CardinalityEstimator, CardinalityEstimatorTrait};
 use crate::hyperloglog::HyperLogLog;
-use crate::representation::{Representation, RepresentationTrait};
+use crate::representation::{Representation, REPRESENTATION_MASK, RepresentationTrait};
 
 impl<T, H, const P: usize, const W: usize> Serialize for CardinalityEstimator<T, H, P, W>
 where
@@ -83,7 +84,9 @@ where
         estimator.data = match opt_vec {
             // estimator is not small, and we need to replace its data with the deserialized array.
             Some(vec) => {
-                if vec.len() == HyperLogLog::<P, W>::HLL_SLICE_LEN {
+                if vec.len() <= 2 {
+                    return Err(Error::custom(format!("invalid length of vec {:?}", &vec)));
+                } else if vec.len() == HyperLogLog::<P, W>::HLL_SLICE_LEN {
                     HyperLogLog::<P, W>::from(vec).to_data()
                 } else {
                     let slice_len = vec.len();
@@ -91,7 +94,16 @@ where
                 }
             }
             // estimator is small, and we can just set its data field to the deserialized value.
-            None => data,
+            None => {
+                if data & REPRESENTATION_MASK == 0 {
+                    data
+                } else {
+                    return Err(Error::custom(format!(
+                        "invalid data for small representation {}",
+                        data
+                    )));
+                }
+            }
         };
 
         Ok(estimator)

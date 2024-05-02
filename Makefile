@@ -1,4 +1,4 @@
-.PHONY: test bench bench-extended fuzz fuzz-sanitize lint fmt clean build doc
+.PHONY: test bench bench-extended fuzz-estimator fuzz-serde lint fmt clean build doc
 
 all: build
 
@@ -19,11 +19,11 @@ bench-extended:
 	cargo criterion --bench cardinality_estimator --message-format json | tee $(BENCH_RESULTS_PATH)/results.json
 	python3 benches/analyze.py
 
-fuzz:
-	cargo +nightly fuzz run fuzz_target_estimator -- -max_len=65536
+fuzz-estimator:
+	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run estimator -- -max_len=65536
 
-fuzz-sanitize:
-	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run fuzz_target_estimator -- -max_len=65536
+fuzz-serde:
+	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run serde -- -max_len=65536
 
 lint:
 	cargo clippy -- -D warnings

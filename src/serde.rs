@@ -153,4 +153,13 @@ pub mod tests {
             "Deserialization should fail for invalid JSON"
         );
     }
+
+    #[test_case("[12345,null]".as_bytes(); "case 1")]
+    #[test_case(&[91, 49, 55, 44, 13, 10, 91, 13, 93, 93]; "case 2")]
+    #[test_case(&[91, 51, 44, 10, 110, 117, 108, 108, 93, 122]; "case 3")]
+    #[test_case(&[91, 51, 44, 10, 110, 117, 108, 108, 93]; "case 4")]
+    fn test_failed_deserialization(input: &[u8]) {
+        let result: Result<CardinalityEstimator<str>, _> = serde_json::from_slice(input);
+        assert!(result.is_err());
+    }
 }

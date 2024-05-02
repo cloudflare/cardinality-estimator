@@ -91,7 +91,7 @@ impl<const P: usize, const W: usize> RepresentationTrait for Small<P, W> {
 
     /// Free memory occupied by the `Small` representation
     #[inline]
-    fn drop(&mut self) {}
+    unsafe fn drop(&mut self) {}
 
     /// Convert `Small` representation to `data`
     #[inline]

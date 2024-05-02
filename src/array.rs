@@ -3,7 +3,7 @@
 //!
 //! The `data` format of array representation:
 //! - 0..1 bits     - store representation type (bits are set to `01`)
-//! - 2..55 bits    - store pointer to `u32` slice (on `x86_64 systems only 48-bits are needed).
+//! - 2..55 bits    - store pointer to `u32` slice (on `x86_64` systems only 48-bits are needed).
 //! - 56..63 bits   - store number of items `N` stored in array
 //!
 //! Slice encoding:
@@ -67,7 +67,7 @@ impl<'a, const P: usize, const W: usize> Array<'a, P, W> {
             let new_arr = Self::from_vec(vec![0; self.cap * 2], self.len + 1);
             new_arr.arr[..self.len].copy_from_slice(self.arr);
             new_arr.arr[self.len] = h;
-            self.drop();
+            unsafe { self.drop() };
             *self = new_arr;
             return true;
         };
@@ -96,7 +96,7 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for Array<'a, P, W>
         } else {
             // upgrade from `Array` to `HyperLogLog` representation
             let mut hll = HyperLogLog::<P, W>::new(self);
-            self.drop();
+            unsafe { self.drop() };
             hll.insert_encoded_hash(h)
         }
     }
@@ -114,10 +114,10 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for Array<'a, P, W>
     }
 
     /// Free memory occupied by the `Array` representation
+    /// SAFETY: caller of this method must ensure that `self.arr` holds valid slice elements.
     #[inline]
-    fn drop(&mut self) {
-        // SAFETY: caller of this method must ensure that `self.arr` holds valid slice elements.
-        drop(unsafe { Box::from_raw(self.arr) });
+    unsafe fn drop(&mut self) {
+        drop(Box::from_raw(self.arr));
     }
 
     /// Convert `Array` representation to `data`
@@ -146,7 +146,6 @@ impl<'a, const P: usize, const W: usize> From<usize> for Array<'a, P, W> {
         let ptr = (data & PTR_MASK) as *mut u32;
         let len = data >> LEN_OFFSET;
         let cap = len.next_power_of_two();
-        // SAFETY: caller of this method must ensure that `data` contains valid slice pointer.
         let arr = unsafe { slice::from_raw_parts_mut(ptr, cap) };
         Self { len, cap, arr }
     }
@@ -169,6 +168,7 @@ impl<'a, const P: usize, const W: usize> Deref for Array<'a, P, W> {
 /// Background reading: https://tinyurl.com/2e4srh2d
 #[inline]
 fn contains_vectorized<const N: usize>(a: &[u32], v: u32) -> bool {
+    debug_assert_eq!(a.len() % N, 0);
     a.chunks_exact(N)
         .any(|chunk| contains_fixed_vectorized::<N>(chunk.try_into().unwrap(), v))
 }

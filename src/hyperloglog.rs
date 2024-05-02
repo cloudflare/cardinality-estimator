@@ -155,10 +155,10 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'a,
     }
 
     /// Free memory occupied by the `HyperLogLog` representation
+    /// SAFETY: caller of this method must ensure that `self.data` holds valid slice elements.
     #[inline]
-    fn drop(&mut self) {
-        // SAFETY: caller of this method must ensure that `self.data` holds valid slice elements.
-        drop(unsafe { Box::from_raw(self.data) });
+    unsafe fn drop(&mut self) {
+        drop(Box::from_raw(self.data));
     }
 
     /// Convert `HyperLogLog` representation to `data`

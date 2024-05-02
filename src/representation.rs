@@ -23,7 +23,7 @@ pub(crate) trait RepresentationTrait {
     fn insert_encoded_hash(&mut self, h: u32) -> usize;
     fn estimate(&self) -> usize;
     fn size_of(&self) -> usize;
-    fn drop(&mut self);
+    unsafe fn drop(&mut self);
     fn to_data(&self) -> usize;
     fn to_string(&self) -> String {
         format!("estimate: {}, size: {}", self.estimate(), self.size_of())

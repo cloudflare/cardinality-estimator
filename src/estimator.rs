@@ -13,7 +13,7 @@ where
     T: Hash + ?Sized,
     H: Hasher + Default,
 {
-    /// Raw data format described above
+    /// Data field represents tagged pointer with its format described in lib.rs
     pub(crate) data: usize,
     /// Zero-sized build hasher
     build_hasher: BuildHasherDefault<H>,
@@ -94,7 +94,7 @@ where
                 for &h in lhs_arr.deref() {
                     hll.insert_encoded_hash(h);
                 }
-                lhs_arr.drop();
+                unsafe { lhs_arr.drop() };
                 self.data = hll.to_data();
             }
             (Representation::Hll(mut lhs_hll), Representation::Hll(rhs_hll)) => {
@@ -179,7 +179,7 @@ where
     /// Free memory occupied by `CardinalityEstimator`
     #[inline]
     fn drop(&mut self) {
-        self.representation().drop();
+        unsafe { self.representation().drop() };
     }
 }
 

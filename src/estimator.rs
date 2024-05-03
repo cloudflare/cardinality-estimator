@@ -21,24 +21,17 @@ where
     _phantom_data: PhantomData<T>,
 }
 
-/// Cardinality estimator trait representing common estimator operations.
-pub trait CardinalityEstimatorTrait<T: Hash + ?Sized> {
-    fn new() -> Self;
-    fn insert(&mut self, item: &T);
-    fn estimate(&mut self) -> usize;
-    fn merge(&mut self, rhs: &Self);
-    fn name() -> String;
-}
-
-impl<T, H, const P: usize, const W: usize> CardinalityEstimatorTrait<T>
-    for CardinalityEstimator<T, H, P, W>
+impl<T, H, const P: usize, const W: usize> CardinalityEstimator<T, H, P, W>
 where
     T: Hash + ?Sized,
     H: Hasher + Default,
 {
+    /// Ensure that `P` and `W` are in correct range at compile time
+    const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
+
     /// Creates new instance of `CardinalityEstimator`
     #[inline]
-    fn new() -> Self {
+    pub fn new() -> Self {
         // compile time check of params
         #[allow(clippy::let_unit_value)]
         let _ = Self::VALID_PARAMS;
@@ -53,20 +46,20 @@ where
 
     /// Insert a hashable item into `CardinalityEstimator`
     #[inline]
-    fn insert(&mut self, item: &T) {
+    pub fn insert(&mut self, item: &T) {
         let hash = self.build_hasher.hash_one(&item);
         self.insert_hash(hash);
     }
 
     /// Return cardinality estimate
     #[inline]
-    fn estimate(&mut self) -> usize {
+    pub fn estimate(&self) -> usize {
         self.representation().estimate()
     }
 
     /// Merge cardinality estimators
     #[inline]
-    fn merge(&mut self, rhs: &Self) {
+    pub fn merge(&mut self, rhs: &Self) {
         match (self.representation(), rhs.representation()) {
             (_, Representation::Small(rhs_small)) => {
                 for h in rhs_small.items() {
@@ -102,19 +95,6 @@ where
             }
         }
     }
-
-    fn name() -> String {
-        "cardinality-estimator".to_string()
-    }
-}
-
-impl<T, H, const P: usize, const W: usize> CardinalityEstimator<T, H, P, W>
-where
-    T: Hash + ?Sized,
-    H: Hasher + Default,
-{
-    /// Ensure that `P` and `W` are in correct range at compile time
-    const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
 
     /// Returns the representation type of `CardinalityEstimator`.
     #[inline]

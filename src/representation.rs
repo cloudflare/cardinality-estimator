@@ -6,7 +6,7 @@ use crate::array::{Array, MAX_CAPACITY};
 use crate::hyperloglog::HyperLogLog;
 use crate::representation::RepresentationError::*;
 use crate::small::Small;
-use crate::{CardinalityEstimator, CardinalityEstimatorTrait};
+use crate::CardinalityEstimator;
 
 /// Masks used for storing and retrieving representation type stored in lowest 2 bits of `data` field.
 const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;

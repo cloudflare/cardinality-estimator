@@ -53,7 +53,7 @@ cargo install cargo-criterion
 
 Then benchmarks with output format JSON to save results for further analysis:
 ```shell
-make bench-extended
+make bench
 ```
 
 We've benchmarked cardinality-estimator against several other crates in the ecosystem:

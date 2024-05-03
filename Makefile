@@ -8,13 +8,10 @@ build:
 test:
 	cargo test --features with_serde
 
+bench: export RUSTFLAGS = -C target-cpu=native
+bench: export N = 1048576
+bench: export BENCH_RESULTS_PATH = target/bench_results/$(shell date '+%Y%m%d_%H%M%S')
 bench:
-	cargo criterion --bench cardinality_estimator
-
-bench-extended: export RUSTFLAGS = -C target-cpu=native
-bench-extended: export N = 1048576
-bench-extended: export BENCH_RESULTS_PATH = target/bench_results/$(shell date '+%Y%m%d_%H%M%S')
-bench-extended:
 	mkdir -p $(BENCH_RESULTS_PATH)
 	cargo criterion --bench cardinality_estimator --message-format json | tee $(BENCH_RESULTS_PATH)/results.json
 	python3 benches/analyze.py

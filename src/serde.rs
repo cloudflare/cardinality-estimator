@@ -82,7 +82,6 @@ where
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::estimator::CardinalityEstimatorTrait;
     use test_case::test_case;
 
     #[test_case(0; "empty set")]

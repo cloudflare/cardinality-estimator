@@ -1,0 +1,41 @@
+[package]
+name = "cardinality-estimator"
+version = "1.0.0"
+edition = "2021"
+authors = ["Alex Bocharov <bocharov.alexandr@gmail.com>"]
+description = "A crate for estimating the cardinality of distinct elements in a stream or dataset."
+documentation = "https://docs.rs/cardinality-estimator"
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/cloudflare/cardinality-estimator"
+keywords = ["cardinality", "distinct-count", "hyperloglog", "probabilistic", "sketch"]
+categories = ["algorithms", "data-structures"]
+
+[dependencies]
+enum_dispatch = "0.3.13"
+serde = { version = "1.0.197", optional = true }
+wyhash = "0.5.0"
+
+[dev-dependencies]
+amadeus-streaming = "0.4.3"
+criterion = { version = "0.5.0", features = ["html_reports"] }
+dhat = "0.3.3"
+hyperloglog = "1.0.2"
+hyperloglogplus = "0.4.1"
+pprof = { version = "0.13.0", features = ["flamegraph", "criterion", "protobuf-codec"] }
+probabilistic-collections = "0.7.0"
+rand = "0.8.5"
+serde_json = "1.0.115"
+tabled = "0.15.0"
+test-case = "3.3.1"
+
+[[bench]]
+name = "cardinality_estimator"
+harness = false
+
+[features]
+default = []
+with_serde = ["serde"]
+
+[profile.release]
+debug = 1

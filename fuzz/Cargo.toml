@@ -1,0 +1,28 @@
+[package]
+name = "cardinality-estimator-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+cardinality-estimator = { path = "..", features = ["with_serde"] }
+libfuzzer-sys = "0.4"
+serde_json = "1.0.115"
+wyhash = "0.5.0"
+
+[[bin]]
+name = "estimator"
+path = "fuzz_targets/estimator.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "serde"
+path = "fuzz_targets/serde.rs"
+test = false
+doc = false
+bench = false

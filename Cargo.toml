@@ -1,6 +1,6 @@
 [package]
 name = "cardinality-estimator"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["Alex Bocharov <bocharov.alexandr@gmail.com>"]
 description = "A crate for estimating the cardinality of distinct elements in a stream or dataset."
@@ -13,7 +13,7 @@ categories = ["algorithms", "data-structures"]
 
 [dependencies]
 enum_dispatch = "0.3.13"
-serde = { version = "1.0.197", optional = true }
+serde = { version = "1.0", optional = true }
 wyhash = "0.5.0"
 
 [dev-dependencies]
@@ -25,7 +25,7 @@ hyperloglogplus = "0.4.1"
 pprof = { version = "0.13.0", features = ["flamegraph", "criterion", "protobuf-codec"] }
 probabilistic-collections = "0.7.0"
 rand = "0.8.5"
-serde_json = "1.0.115"
+serde_json = "1.0"
 tabled = "0.15.0"
 test-case = "3.3.1"
 

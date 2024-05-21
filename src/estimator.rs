@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use std::hash::{BuildHasher, BuildHasherDefault, Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -174,6 +175,16 @@ where
     }
 }
 
+impl<T, H, const P: usize, const W: usize> Debug for CardinalityEstimator<T, H, P, W>
+where
+    T: Hash + ?Sized,
+    H: Hasher + Default,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.representation())
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -273,8 +284,7 @@ pub mod tests {
 
         format!(
             "representation: {:?}, avg_err: {:.4}",
-            e.representation(),
-            avg_relative_error
+            e, avg_relative_error
         )
     }
 
@@ -323,7 +333,7 @@ pub mod tests {
 
         lhs.merge(&rhs);
 
-        format!("{:?}", lhs.representation())
+        format!("{:?}", lhs)
     }
 
     #[test]

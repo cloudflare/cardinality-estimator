@@ -9,7 +9,6 @@ use crate::representation::{Representation, RepresentationTrait};
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
-#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct CardinalityEstimator<T, H = WyHash, const P: usize = 12, const W: usize = 6>
 where
     T: Hash + ?Sized,
@@ -184,6 +183,25 @@ where
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.representation())
     }
+}
+
+#[cfg(feature = "mem_dbg")]
+impl<T, H, const P: usize, const W: usize> mem_dbg::MemSize for CardinalityEstimator<T, H, P, W>
+where
+    T: Hash + ?Sized,
+    H: Hasher + Default,
+{
+    fn mem_size(&self, flags: mem_dbg::SizeFlags) -> usize {
+        self.representation().mem_size(flags)
+    }
+}
+
+#[cfg(feature = "mem_dbg")]
+impl<T, H, const P: usize, const W: usize> mem_dbg::MemDbgImpl for CardinalityEstimator<T, H, P, W>
+where
+    T: Hash + ?Sized,
+    H: Hasher + Default,
+{
 }
 
 #[cfg(test)]

@@ -17,8 +17,8 @@ const REPRESENTATION_HLL: usize = 0x0000_0000_0000_0003;
 /// Representation types supported by `CardinalityEstimator`
 #[repr(u8)]
 #[derive(Debug, PartialEq)]
-#[enum_dispatch]
 #[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
+#[enum_dispatch]
 pub(crate) enum Representation<'a, const P: usize, const W: usize> {
     Small(Small<P, W>),
     Array(Array<'a, P, W>),

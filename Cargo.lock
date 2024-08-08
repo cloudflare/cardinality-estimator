@@ -146,6 +146,7 @@ dependencies = [
  "enum_dispatch",
  "hyperloglog",
  "hyperloglogplus",
+ "mem_dbg",
  "pprof",
  "probabilistic-collections",
  "rand 0.8.5",
@@ -557,6 +558,27 @@ name = "log"
 version = "0.4.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "90ed8c1e510134f979dbc4f070f87d4313098b704861a105fe34231c70a3901c"
+
+[[package]]
+name = "mem_dbg"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d725741c53100b58239ec07787d1e2180bceaac80927464f68285de513fedc5a"
+dependencies = [
+ "bitflags 2.5.0",
+ "mem_dbg-derive",
+]
+
+[[package]]
+name = "mem_dbg-derive"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d91f4e444d65e3e625fda34ffbf52d92f557a4cf9e85f58d7a7e084c6c60081"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.58",
+]
 
 [[package]]
 name = "memchr"

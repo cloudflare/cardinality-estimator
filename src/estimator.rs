@@ -9,6 +9,7 @@ use crate::representation::{Representation, RepresentationTrait};
 
 /// Ensure that only 64-bit architecture is being used.
 #[cfg(target_pointer_width = "64")]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub struct CardinalityEstimator<T, H = WyHash, const P: usize = 12, const W: usize = 6>
 where
     T: Hash + ?Sized,

@@ -25,6 +25,7 @@ const LEN_OFFSET: usize = 56;
 /// Mask used for accessing heap allocated data stored at the pointer in `data` field.
 const PTR_MASK: usize = ((1 << LEN_OFFSET) - 1) & !3;
 
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 /// Array representation container
 pub(crate) struct Array<'a, const P: usize, const W: usize> {
     /// Number of items stored in the array

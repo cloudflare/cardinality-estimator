@@ -186,6 +186,7 @@ fn measure_error<E: CardinalityEstimatorTrait<usize>>(cardinality: usize) -> Str
 }
 
 #[derive(Tabled)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct StatRecord {
     cardinality: usize,
     cardinality_estimator: String,
@@ -195,6 +196,7 @@ struct StatRecord {
     hyperloglogplus: String,
 }
 
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct CardinalityEstimatorMut(CardinalityEstimator<usize>);
 
 impl CardinalityEstimatorTrait<usize> for CardinalityEstimatorMut {
@@ -219,6 +221,7 @@ impl CardinalityEstimatorTrait<usize> for CardinalityEstimatorMut {
     }
 }
 
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct AmadeusStreamingEstimator(amadeus_streaming::HyperLogLog<usize>);
 
 impl CardinalityEstimatorTrait<usize> for AmadeusStreamingEstimator {
@@ -243,6 +246,7 @@ impl CardinalityEstimatorTrait<usize> for AmadeusStreamingEstimator {
     }
 }
 
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct ProbabilisticCollections(probabilistic_collections::hyperloglog::HyperLogLog<usize>);
 
 impl CardinalityEstimatorTrait<usize> for ProbabilisticCollections {
@@ -269,6 +273,7 @@ impl CardinalityEstimatorTrait<usize> for ProbabilisticCollections {
     }
 }
 
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct HyperLogLog(hyperloglog::HyperLogLog);
 
 impl CardinalityEstimatorTrait<usize> for HyperLogLog {
@@ -293,6 +298,7 @@ impl CardinalityEstimatorTrait<usize> for HyperLogLog {
     }
 }
 
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct HyperLogLogPlus(hyperloglogplus::HyperLogLogPlus<usize, BuildHasherDefault<WyHash>>);
 
 impl CardinalityEstimatorTrait<usize> for HyperLogLogPlus {

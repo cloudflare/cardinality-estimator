@@ -23,6 +23,7 @@ use crate::representation::RepresentationTrait;
 const PTR_MASK: usize = !3;
 
 #[derive(PartialEq)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub(crate) struct HyperLogLog<'a, const P: usize = 12, const W: usize = 6> {
     pub(crate) data: &'a mut [u32],
 }

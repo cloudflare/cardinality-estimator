@@ -15,6 +15,7 @@ categories = ["algorithms", "data-structures"]
 enum_dispatch = "0.3.13"
 serde = { version = "1.0", optional = true }
 wyhash = "0.5.0"
+mem_dbg = {version = "0.2.2", optional = true}
 
 [dev-dependencies]
 amadeus-streaming = "0.4.3"

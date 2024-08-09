@@ -111,7 +111,7 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for Array<'a, P, W>
     /// Return memory size of `Array` representation
     #[inline]
     fn size_of(&self) -> usize {
-        size_of::<usize>() + size_of_val(self.arr)
+       size_of::<usize>() + size_of::<usize>() + size_of::<&[u32]>() + size_of_val(self.arr)
     }
 
     /// Free memory occupied by the `Array` representation

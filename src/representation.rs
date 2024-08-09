@@ -15,8 +15,8 @@ const REPRESENTATION_ARRAY: usize = 0x0000_0000_0000_0001;
 const REPRESENTATION_HLL: usize = 0x0000_0000_0000_0003;
 
 /// Representation types supported by `CardinalityEstimator`
-#[repr(u8)]
-#[derive(Debug, PartialEq)]
+// #[repr(u8)]
+#[derive(PartialEq)]
 #[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 #[enum_dispatch]
 pub(crate) enum Representation<'a, const P: usize, const W: usize> {
@@ -26,7 +26,6 @@ pub(crate) enum Representation<'a, const P: usize, const W: usize> {
 }
 
 /// Representation trait which must be implemented by all representations.
-#[enum_dispatch(Representation<P, W>)]
 pub(crate) trait RepresentationTrait {
     fn insert_encoded_hash(&mut self, h: u32) -> usize;
     fn estimate(&self) -> usize;
@@ -35,6 +34,64 @@ pub(crate) trait RepresentationTrait {
     fn to_data(&self) -> usize;
     fn to_string(&self) -> String {
         format!("estimate: {}, size: {}", self.estimate(), self.size_of())
+    }
+}
+
+impl<'a, const P: usize, const W: usize> core::fmt::Debug for Representation<'a, P, W> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
+    }
+}
+
+impl<'a, const P: usize, const W: usize> RepresentationTrait for Representation<'a, P, W> {
+    #[inline]
+    fn insert_encoded_hash(&mut self, h: u32) -> usize {
+        match self {
+            Representation::Small(s) => s.insert_encoded_hash(h) as usize,
+            Representation::Array(a) => a.insert_encoded_hash(h) as usize,
+            Representation::Hll(hll) => hll.insert_encoded_hash(h) as usize,
+        }
+    }
+
+    #[inline]
+    fn estimate(&self) -> usize {
+        match self {
+            Representation::Small(s) => s.estimate(),
+            Representation::Array(a) => a.estimate(),
+            Representation::Hll(hll) => hll.estimate(),
+        }
+    }
+
+    #[inline]
+    fn size_of(&self) -> usize {
+        // A priori, we do not know which of the child structs is the largest and therefore
+        // composing the bulk of the memory usage by the enum. Therefore, we subtract the size of
+        // the variants, and then we sum the size of the enum itself.
+        let size_of_variant = match self {
+            Representation::Small(s) => s.size_of() - size_of::<Small<P, W>>(),
+            Representation::Array(a) => a.size_of() - size_of::<Array<'a, P, W>>(),
+            Representation::Hll(hll) => hll.size_of() - size_of::<HyperLogLog<'a, P, W>>(),
+        };
+
+        size_of_variant + size_of::<Self>()
+    }
+
+    #[inline]
+    unsafe fn drop(&mut self) {
+        match self {
+            Representation::Small(s) => s.drop(),
+            Representation::Array(a) => a.drop(),
+            Representation::Hll(hll) => hll.drop(),
+        }
+    }
+
+    #[inline]
+    fn to_data(&self) -> usize {
+        match self {
+            Representation::Small(s) => s.to_data(),
+            Representation::Array(a) => a.to_data(),
+            Representation::Hll(hll) => hll.to_data(),
+        }
     }
 }
 

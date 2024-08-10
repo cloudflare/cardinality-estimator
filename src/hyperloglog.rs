@@ -152,8 +152,12 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'a,
     /// Return memory size of `HyperLogLog`
     #[inline]
     fn size_of(&self) -> usize {
-        // The length of the slice, plus the pointer of the slice reference, and the size of the slice itself.
-        size_of::<usize>() + size_of::<usize>() + size_of_val(self.data)
+        // The size of the slice reference, which is composed by a pointer (usize) and a length (usize)
+        let slice_size = size_of::<&mut [u32]>();
+        // The size of the values in the slice, which are u32 values
+        let slice_size_values = size_of_val(self.data);
+
+        slice_size + slice_size_values
     }
 
     /// Free memory occupied by the `HyperLogLog` representation

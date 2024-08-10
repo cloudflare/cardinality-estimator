@@ -16,6 +16,7 @@ const SMALL_MASK: usize = 0x0000_0000_7fff_ffff;
 
 /// Small representation container
 #[derive(PartialEq)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub(crate) struct Small<const P: usize, const W: usize>(usize);
 
 impl<const P: usize, const W: usize> Small<P, W> {

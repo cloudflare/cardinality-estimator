@@ -23,6 +23,7 @@ use crate::representation::RepresentationTrait;
 const PTR_MASK: usize = !3;
 
 #[derive(PartialEq)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 pub(crate) struct HyperLogLog<'a, const P: usize = 12, const W: usize = 6> {
     pub(crate) data: &'a mut [u32],
 }
@@ -151,7 +152,12 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'a,
     /// Return memory size of `HyperLogLog`
     #[inline]
     fn size_of(&self) -> usize {
-        size_of::<usize>() + size_of_val(self.data)
+        // The size of the slice reference, which is composed by a pointer (usize) and a length (usize)
+        let slice_size = size_of::<&mut [u32]>();
+        // The size of the values in the slice, which are u32 values
+        let slice_size_values = size_of_val(self.data);
+
+        slice_size + slice_size_values
     }
 
     /// Free memory occupied by the `HyperLogLog` representation
@@ -318,7 +324,7 @@ const BETA: [[f64; 8]; 15] = [
         -1.65687801845180e-02,
         -7.95829341087617e-02,
         4.71830602102918e-02,
-        -7.81372902346934e03,
+        -7.81372902346934e-03,
         5.84268708489995e-04,
     ],
     // p = 12

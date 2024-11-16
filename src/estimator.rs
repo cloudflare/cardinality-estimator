@@ -27,15 +27,11 @@ where
     T: Hash + ?Sized,
     H: Hasher + Default,
 {
-    /// Ensure that `P` and `W` are in correct range at compile time
-    const VALID_PARAMS: () = assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6);
-
     /// Creates new instance of `CardinalityEstimator`
     #[inline]
     pub fn new() -> Self {
-        // compile time check of params
-        #[allow(clippy::let_unit_value)]
-        let _ = Self::VALID_PARAMS;
+        // Ensure that `P` and `W` are in correct range at compile time
+        const { assert!(P >= 4 && P <= 18 && W >= 4 && W <= 6) }
 
         Self {
             // Start with empty small representation

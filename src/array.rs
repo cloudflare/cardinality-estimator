@@ -29,9 +29,8 @@ const PTR_MASK: usize = ((1 << LEN_OFFSET) - 1) & !3;
 pub(crate) struct Array<'a, const P: usize, const W: usize> {
     /// Number of items stored in the array
     len: usize,
-    /// Capacity of the array
-    cap: usize,
-    /// Array of items
+    /// Array of items. Not all items are used, only first `len` of them.
+    /// The length of the slice is actually the current capacity.
     arr: &'a mut [u32],
 }
 
@@ -40,9 +39,10 @@ impl<'a, const P: usize, const W: usize> Array<'a, P, W> {
     /// Returns true on success, false otherwise.
     #[inline]
     pub(crate) fn insert(&mut self, h: u32) -> bool {
-        let found = if self.cap == 4 {
+        let cap = self.arr.len();
+        let found = if cap == 4 {
             contains_fixed_vectorized::<4>(self.arr.try_into().unwrap(), h)
-        } else if self.cap == 8 {
+        } else if cap == 8 {
             contains_fixed_vectorized::<8>(self.arr.try_into().unwrap(), h)
         } else {
             // calculate rounded up slice length for efficient look up in batches
@@ -55,16 +55,16 @@ impl<'a, const P: usize, const W: usize> Array<'a, P, W> {
             return true;
         }
 
-        if self.len < self.arr.len() {
+        if self.len < cap {
             // if there are available slots in current array - append to it
             self.arr[self.len] = h;
             self.len += 1;
             return true;
         }
 
-        if self.cap < MAX_CAPACITY {
+        if cap < MAX_CAPACITY {
             // double array capacity up to `MAX_CAPACITY`
-            let new_arr = Self::from_vec(vec![0; self.cap * 2], self.len + 1);
+            let new_arr = Self::from_vec(vec![0; cap * 2], self.len + 1);
             new_arr.arr[..self.len].copy_from_slice(self.arr);
             new_arr.arr[self.len] = h;
             unsafe { self.drop() };
@@ -83,7 +83,7 @@ impl<'a, const P: usize, const W: usize> Array<'a, P, W> {
         std::mem::forget(arr);
         // SAFETY: valid pointer from vector being used to create slice reference
         let arr = unsafe { slice::from_raw_parts_mut(ptr, cap) };
-        Self { len, cap, arr }
+        Self { len, arr }
     }
 }
 
@@ -147,7 +147,7 @@ impl<'a, const P: usize, const W: usize> From<usize> for Array<'a, P, W> {
         let len = data >> LEN_OFFSET;
         let cap = len.next_power_of_two();
         let arr = unsafe { slice::from_raw_parts_mut(ptr, cap) };
-        Self { len, cap, arr }
+        Self { len, arr }
     }
 }
 

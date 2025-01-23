@@ -121,7 +121,7 @@ where
 
     /// Return memory size of `CardinalityEstimator`
     pub fn size_of(&self) -> usize {
-        self.representation().size_of()
+        self.representation().size_of() + std::mem::size_of::<Self>()
     }
 }
 
@@ -177,8 +177,36 @@ where
     H: Hasher + Default,
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.representation())
+
+        #[cfg(not(feature = "mem_dbg"))]
+        return write!(f, "{:?}", self.representation());
+
+        #[cfg(feature = "mem_dbg")]
+        {
+            use mem_dbg::MemSize;
+            return write!(f, "size_of = {:?} mem_dbg = {:?}", self.size_of(), <Self as MemSize>::mem_size(self, mem_dbg::SizeFlags::default() | mem_dbg::SizeFlags::FOLLOW_REFS));
+        }
     }
+}
+
+#[cfg(feature = "mem_dbg")]
+impl<T, H, const P: usize, const W: usize> mem_dbg::MemSize for CardinalityEstimator<T, H, P, W>
+where
+    T: Hash + ?Sized,
+    H: Hasher + Default,
+{
+    fn mem_size(&self, flags: mem_dbg::SizeFlags) -> usize {
+        core::mem::size_of::<Self>() + <Representation<P, W> as mem_dbg::MemSize>::mem_size(&self.representation(), flags)
+    }
+}
+
+#[cfg(feature = "mem_dbg")]
+impl<T, H, const P: usize, const W: usize> mem_dbg::MemDbgImpl for CardinalityEstimator<T, H, P, W>
+where
+    T: Hash + ?Sized,
+    H: Hasher + Default,
+{
+    
 }
 
 #[cfg(test)]

@@ -25,6 +25,7 @@ const LEN_OFFSET: usize = 56;
 /// Mask used for accessing heap allocated data stored at the pointer in `data` field.
 const PTR_MASK: usize = ((1 << LEN_OFFSET) - 1) & !3;
 
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 /// Array representation container
 pub(crate) struct Array<'a, const P: usize, const W: usize> {
     /// Number of items stored in the array
@@ -110,7 +111,18 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for Array<'a, P, W>
     /// Return memory size of `Array` representation
     #[inline]
     fn size_of(&self) -> usize {
-        size_of::<usize>() + size_of_val(self.arr)
+        // The size of the len attribute, which is an usize
+        let len_size = size_of::<usize>();
+        // The size of the cap attribute, which is an usize
+        let cap_size = size_of::<usize>();
+        // The size of the arr attribute, which is a slice
+        // and therefore composed of a pointer (usize) and a length (usize)
+        let arr_size = size_of::<usize>() * 2;
+        // The size of the values in the arr attribute, which are
+        // u32 values
+        let arr_size_values = size_of_val(self.arr);
+
+        len_size + cap_size + arr_size + arr_size_values
     }
 
     /// Free memory occupied by the `Array` representation

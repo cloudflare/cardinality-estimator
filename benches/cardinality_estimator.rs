@@ -186,6 +186,7 @@ fn measure_error<E: CardinalityEstimatorTrait<usize>>(cardinality: usize) -> Str
 }
 
 #[derive(Tabled)]
+#[cfg_attr(feature = "mem_dbg", derive(mem_dbg::MemDbg, mem_dbg::MemSize))]
 struct StatRecord {
     cardinality: usize,
     cardinality_estimator: String,

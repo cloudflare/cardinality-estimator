@@ -27,7 +27,7 @@ pub(crate) struct HyperLogLog<'a, const P: usize = 12, const W: usize = 6> {
     pub(crate) data: &'a mut [u32],
 }
 
-impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
+impl<const P: usize, const W: usize> HyperLogLog<'_, P, W> {
     /// Number of HyperLogLog registers
     const M: usize = 1 << P;
     /// HyperLogLog representation `u32` slice length based on #registers, stored zero registers, harmonic sum, and
@@ -107,11 +107,11 @@ impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
         // Update HyperLogLog's number of zero registers and harmonic sum
         // SAFETY: `self.data` is always guaranteed to have 0-th and 1-st elements.
         let zeros_and_sum = unsafe { self.data.get_unchecked_mut(0..2) };
-        zeros_and_sum[0] -= (old_rank == 0) as u32 & (zeros_and_sum[0] > 0) as u32;
+        zeros_and_sum[0] -= u32::from(old_rank == 0) & u32::from(zeros_and_sum[0] > 0);
 
         let mut sum = f32::from_bits(zeros_and_sum[1]);
-        sum -= 1.0 / ((1u64 << (old_rank as u64)) as f32);
-        sum += 1.0 / ((1u64 << (new_rank as u64)) as f32);
+        sum -= 1.0 / ((1u64 << u64::from(old_rank)) as f32);
+        sum += 1.0 / ((1u64 << u64::from(new_rank)) as f32);
         zeros_and_sum[1] = sum.to_bits();
     }
 
@@ -128,7 +128,7 @@ impl<'a, const P: usize, const W: usize> HyperLogLog<'a, P, W> {
     }
 }
 
-impl<'a, const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'a, P, W> {
+impl<const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'_, P, W> {
     /// Insert encoded hash into `HyperLogLog` representation.
     #[inline]
     fn insert_encoded_hash(&mut self, h: u32) -> usize {
@@ -142,9 +142,9 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'a,
     fn estimate(&self) -> usize {
         // SAFETY: `self.data` is always guaranteed to have 0-th and 1-st elements.
         let zeros = unsafe { *self.data.get_unchecked(0) };
-        let sum = f32::from_bits(unsafe { *self.data.get_unchecked(1) }) as f64;
+        let sum = f64::from(f32::from_bits(unsafe { *self.data.get_unchecked(1) }));
         let estimate = alpha(Self::M) * ((Self::M * (Self::M - zeros as usize)) as f64)
-            / (sum + beta_horner(zeros as f64, P));
+            / (sum + beta_horner(f64::from(zeros), P));
         (estimate + 0.5) as usize
     }
 
@@ -179,7 +179,7 @@ impl<const P: usize, const W: usize> From<usize> for HyperLogLog<'_, P, W> {
     }
 }
 
-impl<'a, const P: usize, const W: usize> From<Vec<u32>> for HyperLogLog<'a, P, W> {
+impl<const P: usize, const W: usize> From<Vec<u32>> for HyperLogLog<'_, P, W> {
     /// Create new instance of `HyperLogLog` from given `hll_data`
     #[inline]
     fn from(mut hll_data: Vec<u32>) -> Self {

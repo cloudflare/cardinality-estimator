@@ -176,7 +176,7 @@ fn measure_error<E: CardinalityEstimatorTrait<usize>>(cardinality: usize) -> Str
         };
         total_relative_error += relative_error;
     }
-    let avg_relative_error = total_relative_error / (n as f64);
+    let avg_relative_error = total_relative_error / f64::from(n);
 
     if avg_relative_error < 1.0 {
         format!("{:.4}", avg_relative_error)

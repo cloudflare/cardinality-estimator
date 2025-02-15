@@ -39,3 +39,6 @@ with_serde = ["serde"]
 
 [profile.release]
 debug = 1
+
+[lints.clippy]
+cast_lossless = "deny"

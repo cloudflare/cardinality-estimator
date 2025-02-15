@@ -46,7 +46,7 @@ pub enum RepresentationError {
     HllRepresentationInvalid,
 }
 
-impl<'a, const P: usize, const W: usize> Representation<'a, P, W> {
+impl<const P: usize, const W: usize> Representation<'_, P, W> {
     /// Returns the representation type of `CardinalityEstimator`.
     ///
     /// This method extracts the representation based on the lowest 2 bits of `data`.

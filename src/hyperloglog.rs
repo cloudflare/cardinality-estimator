@@ -17,7 +17,7 @@ use std::fmt::{Debug, Formatter};
 use std::mem::{size_of, size_of_val};
 use std::slice;
 
-use crate::representation::RepresentationTrait;
+use crate::representation::{RepresentationTrait, REPRESENTATION_HLL};
 
 /// Mask used for accessing heap allocated data stored at the pointer in `data` field.
 const PTR_MASK: usize = !3;
@@ -164,7 +164,7 @@ impl<const P: usize, const W: usize> RepresentationTrait for HyperLogLog<'_, P, 
     /// Convert `HyperLogLog` representation to `data`
     #[inline]
     fn to_data(&self) -> usize {
-        (PTR_MASK & self.data.as_ptr() as usize) | 3
+        (PTR_MASK & self.data.as_ptr() as usize) | REPRESENTATION_HLL
     }
 }
 

@@ -9,10 +9,10 @@ use crate::small::Small;
 use crate::CardinalityEstimator;
 
 /// Masks used for storing and retrieving representation type stored in lowest 2 bits of `data` field.
-const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
-const REPRESENTATION_SMALL: usize = 0x0000_0000_0000_0000;
-const REPRESENTATION_ARRAY: usize = 0x0000_0000_0000_0001;
-const REPRESENTATION_HLL: usize = 0x0000_0000_0000_0003;
+pub(crate) const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
+pub(crate) const REPRESENTATION_SMALL: usize = 0x0000_0000_0000_0000;
+pub(crate) const REPRESENTATION_ARRAY: usize = 0x0000_0000_0000_0001;
+pub(crate) const REPRESENTATION_HLL: usize = 0x0000_0000_0000_0003;
 
 /// Representation types supported by `CardinalityEstimator`
 #[repr(u8)]

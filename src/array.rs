@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::slice;
 
 use crate::hyperloglog::HyperLogLog;
-use crate::representation::RepresentationTrait;
+use crate::representation::{RepresentationTrait, REPRESENTATION_ARRAY};
 
 /// Maximum number of elements stored in array representation
 pub(crate) const MAX_CAPACITY: usize = 128;
@@ -123,7 +123,7 @@ impl<const P: usize, const W: usize> RepresentationTrait for Array<'_, P, W> {
     /// Convert `Array` representation to `data`
     #[inline]
     fn to_data(&self) -> usize {
-        (self.len << LEN_OFFSET) | (PTR_MASK & self.arr.as_ptr() as usize) | 1
+        (self.len << LEN_OFFSET) | (PTR_MASK & self.arr.as_ptr() as usize) | REPRESENTATION_ARRAY
     }
 }
 

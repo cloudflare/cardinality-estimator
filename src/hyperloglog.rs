@@ -399,3 +399,13 @@ const BETA: [[f64; 8]; 15] = [
         0.00291076804642205,
     ],
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hyerloglog_size() {
+        assert_eq!(std::mem::size_of::<HyperLogLog<0, 0>>(), 16);
+    }
+}

@@ -102,3 +102,13 @@ impl<const P: usize, const W: usize> Representation<'_, P, W> {
         Ok(estimator)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_size() {
+        assert_eq!(std::mem::size_of::<Representation<0, 0>>(), 32);
+    }
+}

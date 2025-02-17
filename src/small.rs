@@ -112,3 +112,13 @@ impl<const P: usize, const W: usize> From<usize> for Small<P, W> {
         Self(data)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_size() {
+        assert_eq!(std::mem::size_of::<Small<0, 0>>(), 8);
+    }
+}

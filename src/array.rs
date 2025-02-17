@@ -182,3 +182,13 @@ fn contains_fixed_vectorized<const N: usize>(a: [u32; N], v: u32) -> bool {
     }
     res
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn array_size() {
+        assert_eq!(std::mem::size_of::<Array<0, 0>>(), 24);
+    }
+}

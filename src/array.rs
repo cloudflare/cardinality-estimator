@@ -16,7 +16,7 @@ use std::ops::Deref;
 use std::slice;
 
 use crate::hyperloglog::HyperLogLog;
-use crate::representation::RepresentationTrait;
+use crate::representation::{RepresentationTrait, REPRESENTATION_ARRAY};
 
 /// Maximum number of elements stored in array representation
 pub(crate) const MAX_CAPACITY: usize = 128;
@@ -87,7 +87,7 @@ impl<'a, const P: usize, const W: usize> Array<'a, P, W> {
     }
 }
 
-impl<'a, const P: usize, const W: usize> RepresentationTrait for Array<'a, P, W> {
+impl<const P: usize, const W: usize> RepresentationTrait for Array<'_, P, W> {
     /// Insert encoded hash into `HyperLogLog` representation.
     #[inline]
     fn insert_encoded_hash(&mut self, h: u32) -> usize {
@@ -123,23 +123,23 @@ impl<'a, const P: usize, const W: usize> RepresentationTrait for Array<'a, P, W>
     /// Convert `Array` representation to `data`
     #[inline]
     fn to_data(&self) -> usize {
-        (self.len << LEN_OFFSET) | (PTR_MASK & self.arr.as_ptr() as usize) | 1
+        (self.len << LEN_OFFSET) | (PTR_MASK & self.arr.as_ptr() as usize) | REPRESENTATION_ARRAY
     }
 }
 
-impl<'a, const P: usize, const W: usize> Debug for Array<'a, P, W> {
+impl<const P: usize, const W: usize> Debug for Array<'_, P, W> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.to_string())
     }
 }
 
-impl<'a, const P: usize, const W: usize> PartialEq for Array<'a, P, W> {
+impl<const P: usize, const W: usize> PartialEq for Array<'_, P, W> {
     fn eq(&self, other: &Self) -> bool {
         self.deref() == other.deref()
     }
 }
 
-impl<'a, const P: usize, const W: usize> From<usize> for Array<'a, P, W> {
+impl<const P: usize, const W: usize> From<usize> for Array<'_, P, W> {
     /// Create new instance of `Array` from given `data`
     #[inline]
     fn from(data: usize) -> Self {
@@ -151,7 +151,7 @@ impl<'a, const P: usize, const W: usize> From<usize> for Array<'a, P, W> {
     }
 }
 
-impl<'a, const P: usize, const W: usize> Deref for Array<'a, P, W> {
+impl<const P: usize, const W: usize> Deref for Array<'_, P, W> {
     type Target = [u32];
 
     fn deref(&self) -> &Self::Target {
@@ -181,4 +181,14 @@ fn contains_fixed_vectorized<const N: usize>(a: [u32; N], v: u32) -> bool {
         res |= x == v
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn array_size() {
+        assert_eq!(std::mem::size_of::<Array<0, 0>>(), 24);
+    }
 }

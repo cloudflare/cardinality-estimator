@@ -9,10 +9,10 @@ use crate::small::Small;
 use crate::CardinalityEstimator;
 
 /// Masks used for storing and retrieving representation type stored in lowest 2 bits of `data` field.
-const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
-const REPRESENTATION_SMALL: usize = 0x0000_0000_0000_0000;
-const REPRESENTATION_ARRAY: usize = 0x0000_0000_0000_0001;
-const REPRESENTATION_HLL: usize = 0x0000_0000_0000_0003;
+pub(crate) const REPRESENTATION_MASK: usize = 0x0000_0000_0000_0003;
+pub(crate) const REPRESENTATION_SMALL: usize = 0x0000_0000_0000_0000;
+pub(crate) const REPRESENTATION_ARRAY: usize = 0x0000_0000_0000_0001;
+pub(crate) const REPRESENTATION_HLL: usize = 0x0000_0000_0000_0003;
 
 /// Representation types supported by `CardinalityEstimator`
 #[repr(u8)]
@@ -46,7 +46,7 @@ pub enum RepresentationError {
     HllRepresentationInvalid,
 }
 
-impl<'a, const P: usize, const W: usize> Representation<'a, P, W> {
+impl<const P: usize, const W: usize> Representation<'_, P, W> {
     /// Returns the representation type of `CardinalityEstimator`.
     ///
     /// This method extracts the representation based on the lowest 2 bits of `data`.
@@ -100,5 +100,15 @@ impl<'a, const P: usize, const W: usize> Representation<'a, P, W> {
         };
 
         Ok(estimator)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_size() {
+        assert_eq!(std::mem::size_of::<Representation<0, 0>>(), 32);
     }
 }

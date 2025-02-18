@@ -9,7 +9,7 @@
 use std::fmt::{Debug, Formatter};
 
 use crate::array::Array;
-use crate::representation::RepresentationTrait;
+use crate::representation::{RepresentationTrait, REPRESENTATION_SMALL};
 
 /// Mask used for extracting hashes stored in small representation (31 bits)
 const SMALL_MASK: usize = 0x0000_0000_7fff_ffff;
@@ -96,7 +96,7 @@ impl<const P: usize, const W: usize> RepresentationTrait for Small<P, W> {
     /// Convert `Small` representation to `data`
     #[inline]
     fn to_data(&self) -> usize {
-        self.0
+        self.0 | REPRESENTATION_SMALL
     }
 }
 
@@ -110,5 +110,15 @@ impl<const P: usize, const W: usize> From<usize> for Small<P, W> {
     /// Create new instance of `Small` from given `data`
     fn from(data: usize) -> Self {
         Self(data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn small_size() {
+        assert_eq!(std::mem::size_of::<Small<0, 0>>(), 8);
     }
 }

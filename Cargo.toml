@@ -22,6 +22,7 @@ criterion = { version = "0.5.0", features = ["html_reports"] }
 dhat = "0.3.3"
 hyperloglog = "1.0.2"
 hyperloglogplus = "0.4.1"
+postcard = { version = "1.1.1", features=["alloc"] }
 pprof = { version = "0.14.0", features = ["flamegraph", "criterion", "protobuf-codec"] }
 probabilistic-collections = "0.7.0"
 rand = "0.8.5"

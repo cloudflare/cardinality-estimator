@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 cardinality-estimator = { path = "..", features = ["with_serde"] }
 libfuzzer-sys = "0.4"
+postcard = { version = "1.1.1", features = ["alloc"] }
 serde_json = "1.0.115"
 wyhash = "0.5.0"
 
@@ -23,6 +24,27 @@ bench = false
 [[bin]]
 name = "serde"
 path = "fuzz_targets/serde.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "serde_json_array"
+path = "fuzz_targets/serde_json_array.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "serde_postcard"
+path = "fuzz_targets/serde_postcard.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "serde_roundtrip"
+path = "fuzz_targets/serde_roundtrip.rs"
 test = false
 doc = false
 bench = false

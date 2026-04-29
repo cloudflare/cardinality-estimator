@@ -110,6 +110,23 @@ pub mod tests {
             original_estimator.representation(),
             deserialized_estimator.representation()
         );
+
+        // run each case with postcard serialization as well
+
+        let postcard_serialized =
+            postcard::to_allocvec(&original_estimator).expect("serialization failed");
+        assert!(
+            !postcard_serialized.is_empty(),
+            "postcard_serialized bytes should not be empty"
+        );
+
+        let postcard_estimator: CardinalityEstimator<str> =
+            postcard::from_bytes(&postcard_serialized).expect("deserialization failed");
+
+        assert_eq!(
+            original_estimator.representation(),
+            postcard_estimator.representation()
+        );
     }
 
     #[test]
@@ -129,6 +146,9 @@ pub mod tests {
     #[test_case(&[91, 51, 44, 10, 110, 117, 108, 108, 93]; "case 4")]
     fn test_failed_deserialization(input: &[u8]) {
         let result: Result<CardinalityEstimator<str>, _> = serde_json::from_slice(input);
+        assert!(result.is_err());
+
+        let result: Result<CardinalityEstimator<str>, _> = postcard::from_bytes(input);
         assert!(result.is_err());
     }
 }

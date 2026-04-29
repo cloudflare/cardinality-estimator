@@ -22,6 +22,15 @@ fuzz-estimator:
 fuzz-serde:
 	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run serde -- -max_len=65536
 
+fuzz-serde-json-array:
+	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run serde_json_array -- -max_len=65536
+
+fuzz-serde-postcard:
+	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run serde_postcard -- -max_len=65536
+
+fuzz-serde-roundtrip:
+	RUSTFLAGS="-Z sanitizer=address" cargo +nightly fuzz run serde_roundtrip -- -max_len=65536
+
 lint:
 	cargo clippy --features with_serde -- -D warnings
 
